@@ -33,10 +33,10 @@ Default bindings:
 
 | Command | Default shortcut |
 | --- | --- |
-| Go back | `Ctrl+Q` |
-| Go forward | `Ctrl+E` |
+| Go back | `Alt+Left` |
+| Go forward | `Alt+Right` |
 
-Rebind them at `chrome://extensions/shortcuts`. Chosen deliberately over `Alt` as the modifier: on a Mac, Option sits right next to Command, and a slipped `Alt+Q` becoming `Cmd+Q` quits the whole browser — `Ctrl` is in the far corner, away from `Cmd`. `W` was avoided for the same reason `Ctrl+Tab` is off the table: Chrome reserves `Ctrl+W` (close tab) and won't let extensions bind it, so go-forward uses `E` instead.
+Rebind them at `chrome://extensions/shortcuts`. Alt (Option on Mac) + arrow keys is comfortably reachable with one hand and doesn't carry the risk earlier letter-key choices did — there's no `Cmd+Left`/`Cmd+Right` doing anything destructive on Mac (Chrome's own back/forward-in-page-history shortcut is `Cmd+[`/`Cmd+]`, not arrows), unlike the `Alt+Q`-slipping-to-`Cmd+Q`-quits-the-browser risk that ruled out letter keys under `Alt`. Left/right also doubles as a natural back/forward mnemonic.
 
 ## Options
 
@@ -49,7 +49,7 @@ Switching modes resets your current back/forward history (there's no well-define
 
 ## Visual HUD
 
-Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Ctrl and tap `Q`/`E` repeatedly to step through your history; the card stays up and updates in place the whole time, and disappears as soon as you release Ctrl. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a ~1.4s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap the arrow keys repeatedly to step through your history; the card stays up and updates in place the whole time, and disappears as soon as you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a ~1.4s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
 
 ## Permissions
 

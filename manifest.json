@@ -15,11 +15,11 @@
   },
   "commands": {
     "go-back": {
-      "suggested_key": { "default": "Ctrl+Q" },
+      "suggested_key": { "default": "Alt+Left" },
       "description": "Jump to previous tab"
     },
     "go-forward": {
-      "suggested_key": { "default": "Ctrl+E" },
+      "suggested_key": { "default": "Alt+Right" },
       "description": "Jump to next tab in history"
     }
   }
