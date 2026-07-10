@@ -36,7 +36,9 @@ Default bindings:
 | Go back | `Alt+Left` |
 | Go forward | `Alt+Right` |
 
-Rebind them at `chrome://extensions/shortcuts`. Alt (Option on Mac) + arrow keys is comfortably reachable with one hand and doesn't carry the risk earlier letter-key choices did — there's no `Cmd+Left`/`Cmd+Right` doing anything destructive on Mac (Chrome's own back/forward-in-page-history shortcut is `Cmd+[`/`Cmd+]`, not arrows), unlike the `Alt+Q`-slipping-to-`Cmd+Q`-quits-the-browser risk that ruled out letter keys under `Alt`. Left/right also doubles as a natural back/forward mnemonic.
+Alt (Option on Mac) + arrow keys is comfortably reachable with one hand and doesn't carry the risk earlier letter-key choices did — there's no `Cmd+Left`/`Cmd+Right` doing anything destructive on Mac (Chrome's own back/forward-in-page-history shortcut is `Cmd+[`/`Cmd+]`, not arrows), unlike the `Alt+Q`-slipping-to-`Cmd+Q`-quits-the-browser risk that ruled out letter keys under `Alt`. Left/right also doubles as a natural back/forward mnemonic.
+
+Rebind them at `chrome://extensions/shortcuts` — Chrome only allows rebinding a command's shortcut from that page; no extension, including this one, can set it programmatically. Backtrack's options page shows your current bindings and links straight there, plus has a checker where you can press a combo to see if it's on Chrome's known-reserved list (`Ctrl+Tab`, `Ctrl+W`, `Ctrl+T`, etc. — things no extension can ever bind to) before you try setting it.
 
 ## Options
 
@@ -44,6 +46,7 @@ Open the extension's **Details → Extension options** from `chrome://extensions
 
 - **Global vs. per-window history** — global (default) is one shared back/forward history across all your windows; per-window gives each window its own separate history. Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
 - **Visual HUD on/off** — see below. Defaults to on.
+- **Keyboard shortcuts** — read-only display of your current bindings, a button to jump to `chrome://extensions/shortcuts`, and the reserved-combo checker described above.
 
 ## Visual HUD
 

@@ -7,7 +7,7 @@
       body {
         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #1a1a1a;
-        width: 320px;
+        width: 360px;
         padding: 16px;
       }
       label {
@@ -16,7 +16,7 @@
         gap: 8px;
         cursor: pointer;
       }
-      input {
+      input[type="checkbox"] {
         margin-top: 3px;
       }
       p.hint {
@@ -34,6 +34,64 @@
         border: none;
         border-top: 1px solid rgba(0, 0, 0, 0.1);
         margin: 16px 0;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0 0 10px;
+      }
+      .shortcut-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        padding: 4px 0;
+      }
+      .shortcut-row code {
+        font: 12px ui-monospace, Menlo, monospace;
+        background: rgba(0, 0, 0, 0.06);
+        border-radius: 4px;
+        padding: 2px 7px;
+      }
+      button {
+        font: 600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        background: #fff;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+      button:hover {
+        background: rgba(0, 0, 0, 0.04);
+      }
+      details {
+        margin-top: 14px;
+        font-size: 12px;
+      }
+      summary {
+        cursor: pointer;
+        color: #444;
+        font-weight: 600;
+      }
+      details p.hint {
+        margin-left: 0;
+      }
+      input#shortcut-tester {
+        width: 100%;
+        box-sizing: border-box;
+        font: 13px ui-monospace, Menlo, monospace;
+        padding: 6px 8px;
+        margin-top: 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        text-align: center;
+        cursor: default;
+      }
+      p#shortcut-tester-result {
+        margin: 8px 0 0;
+        font-size: 12px;
+        min-height: 14px;
       }
     </style>
   </head>
@@ -57,6 +115,28 @@
       A small card showing the tab you landed on. Turn off for silent, keyboard-only
       cycling with no on-page visual.
     </p>
+
+    <hr />
+
+    <h2>Keyboard shortcuts</h2>
+    <div class="shortcut-row"><span>Go back</span> <code id="go-back-shortcut">…</code></div>
+    <div class="shortcut-row"><span>Go forward</span> <code id="go-forward-shortcut">…</code></div>
+    <p class="hint" style="margin-left: 0">
+      Chrome only lets shortcuts be rebound from its own settings page, not from here.
+    </p>
+    <button type="button" id="open-shortcuts-btn">Change shortcuts…</button>
+
+    <details>
+      <summary>Check a shortcut before you try it</summary>
+      <p class="hint">
+        Click the box below and press a key combo to check it against shortcuts Chrome
+        reserves for itself, which no extension can bind to. Not exhaustive — Chrome's
+        full reserved list isn't published, so the only fully reliable test is trying it
+        at <code>chrome://extensions/shortcuts</code>.
+      </p>
+      <input type="text" id="shortcut-tester" placeholder="Press a key combo…" readonly />
+      <p id="shortcut-tester-result"></p>
+    </details>
 
     <p class="status" id="status"></p>
     <script type="module" src="dist/options.js"></script>
