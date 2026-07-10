@@ -49,7 +49,7 @@ Switching modes resets your current back/forward history (there's no well-define
 
 ## Visual HUD
 
-`chrome.commands` only fires on keydown — there's no keyup signal, so a true hold-modifier-to-preview carousel (like OS-level Alt-Tab) isn't possible here. Instead, each go-back/go-forward press briefly shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter — then fades out after about 1.4 seconds. Pressing again while it's still visible updates it in place rather than re-animating. It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap `Q`/`W` repeatedly to step through your history; the card stays up and updates in place the whole time, and disappears as soon as you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a ~1.4s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
 
 ## Permissions
 
@@ -70,7 +70,6 @@ There's no automated test suite — this is a small, five-file extension best ve
 
 - No tab search or fuzzy matching over tabs/bookmarks/history.
 - No tab management (grouping, saving sessions, closing tabs).
-- No true hold-modifier-to-preview carousel — see the Visual HUD section above for why.
 
 ## Contributing
 

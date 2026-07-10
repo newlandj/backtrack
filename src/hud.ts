@@ -18,7 +18,14 @@ interface HudMessage {
   total?: number;
 }
 
-const HOLD_MS = 1400;
+// chrome.commands itself only ever fires on keydown, but once the HUD is injected into
+// a real page we can listen for the physical Alt keyup directly — giving the
+// hold-Alt-to-preview/release-to-dismiss behavior the original DEV_PLAN.md flagged as
+// needing a content script with broader permissions, which v0.5 already pays for.
+// FALLBACK_HOLD_MS only matters when that keyup already happened before injection
+// finished (a quick single tap-and-release is faster than the round trip), so the HUD
+// doesn't otherwise get stuck open.
+const FALLBACK_HOLD_MS = 1400;
 
 const win = window as unknown as { __backtrackHud?: { show(items: HudItem[], position: number, total: number): void } };
 
@@ -197,6 +204,15 @@ if (!win.__backtrackHud) {
     row.appendChild(chip);
   }
 
+  function hide(): void {
+    if (hideTimer !== null) {
+      window.clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    card.classList.remove("visible");
+    isVisible = false;
+  }
+
   function show(items: HudItem[], position: number, total: number): void {
     render(items, position, total);
 
@@ -220,13 +236,27 @@ if (!win.__backtrackHud) {
     }
 
     if (hideTimer !== null) window.clearTimeout(hideTimer);
-    hideTimer = window.setTimeout(() => {
-      card.classList.remove("visible");
-      isVisible = false;
-    }, HOLD_MS);
+    hideTimer = window.setTimeout(hide, FALLBACK_HOLD_MS);
   }
 
   win.__backtrackHud = { show };
+
+  // Primary dismiss path: the user releases Alt. Capture-phase so a page that stops
+  // propagation on bubble (e.g. a framework's global key handler) can't swallow it.
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.key === "Alt" && isVisible) hide();
+    },
+    true,
+  );
+
+  // If focus leaves the page/window entirely while cycling (alt-tabbing to another
+  // app, a native dialog stealing focus), we won't get a keyup for Alt at all — hide
+  // rather than leave the HUD stuck open.
+  window.addEventListener("blur", () => {
+    if (isVisible) hide();
+  });
 
   chrome.runtime.onMessage.addListener((message: unknown) => {
     const msg = message as HudMessage;
