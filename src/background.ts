@@ -120,22 +120,49 @@ interface HudItem {
 
 const HUD_WINDOW_RADIUS = 2;
 
-// How long the HUD stays up if the user doesn't press again. Single source of truth —
-// passed to hud.ts in every message rather than also living as a constant over there,
-// so there's exactly one place that decides HUD timing, not two that have to agree.
+// How long a cycling session stays "open" if the user doesn't press again, and how long
+// the HUD stays up. Single source of truth — passed to hud.ts in every message rather
+// than also living as a constant over there, so there's exactly one place that decides
+// timing, not two that have to agree.
 const HUD_HOLD_MS = 3000;
 
-// Tracks whether the most recent showHud() call is still within its hold window, so a
-// subsequent jump can be recognized as a continuation of the same cycling session
-// rather than a fresh one. In-memory only (not persisted) — if the service worker gets
-// evicted for being idle, that idle gap means it genuinely wasn't a continuous session
-// anyway, so treating the next jump as fresh on restart is correct, not a bug.
-let lastHudShownAt: number | null = null;
+// Which tab currently "owns" the active cycling session, for two purposes: (1) deciding
+// whether the next jump is a continuation (skip the HUD's entrance animation) or fresh,
+// and (2) knowing which tab to commit — i.e. promote to the front of the MRU stack,
+// discarding the "forward" entries past it — once the session ends. In-memory only.
+let currentHudTabId: number | null = null;
+let commitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingCommit(): void {
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+  }
+}
+
+// A cycling session (however many steps) is a single logical navigation, not a series
+// of independent ones — like walking back through browser page history and then
+// clicking a link, only the final landing spot should become the new "most recent",
+// with the tabs stepped past along the way dropped from the forward direction. Without
+// this, releasing the modifier and pressing again continues walking deeper from the old
+// cursor instead of taking one step from the tab the user actually just committed to.
+// This does the exact same stack mutation a genuine (non-programmatic) tab activation
+// already triggers via recordActivation in the onActivated listener below — committing
+// a cycling session is, after the fact, indistinguishable from a normal deliberate
+// tab switch to that tab.
+async function commitCyclingSession(tabId: number, windowId: number): Promise<void> {
+  cancelPendingCommit();
+  if (currentHudTabId === tabId) currentHudTabId = null;
+  await ensureLoaded();
+  const scope = getOrCreateScope(getScopeKey(scopeMode, windowId));
+  recordActivation(scope, tabId);
+  await persist();
+}
 
 // chrome.commands only fires on keydown (no keyup signal), so a true hold-to-preview
 // carousel isn't possible here — instead the HUD flashes briefly after each press and
 // fades, giving a lightweight sense of where you are in the stack without that gesture.
-async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
+async function showHud(scope: ScopeState, currentTabId: number, instant: boolean): Promise<void> {
   const start = Math.max(0, scope.cursor - HUD_WINDOW_RADIUS);
   const end = Math.min(scope.stack.length - 1, scope.cursor + HUD_WINDOW_RADIUS);
   const ids = scope.stack.slice(start, end + 1);
@@ -153,17 +180,6 @@ async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
     });
   }
   if (items.length === 0) return;
-
-  // Each new tab is a fresh page with its own separate content-script instance — there's
-  // no way to keep literally the same DOM element following you across a tab switch. But
-  // replaying the ~240ms pop-in animation on every single landing mid-cycle reads as the
-  // HUD "going away and coming back" instead of following along. If the previous HUD
-  // would still be on-screen right now (we're inside its hold window), this jump is
-  // clearly a continuation of the same session, so tell hud.ts to skip the entrance
-  // animation and just appear instantly instead.
-  const now = Date.now();
-  const instant = lastHudShownAt !== null && now - lastHudShownAt < HUD_HOLD_MS;
-  lastHudShownAt = now;
 
   try {
     await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ["dist/hud.js"] });
@@ -207,7 +223,25 @@ async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> 
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
-  if (hudEnabled) await showHud(scope, targetTabId);
+
+  // If we're already mid-session (currentHudTabId set from a previous jump that hasn't
+  // committed yet), this jump continues it — otherwise it starts a new one.
+  const instant = currentHudTabId !== null;
+  currentHudTabId = targetTabId;
+
+  // The previous tab's own pending commit (if any) is superseded now that we've moved
+  // on — this new tab owns the session instead. Schedule its own fallback commit: if
+  // nothing commits sooner (an explicit key-release report from hud.ts), this fires
+  // after HUD_HOLD_MS of no further presses. Runs regardless of whether the HUD is
+  // actually shown, since a hud.ts key-release report is only possible when its content
+  // script is running — with the HUD disabled there's no other way to detect "the user
+  // stopped cycling" at all.
+  cancelPendingCommit();
+  commitTimer = setTimeout(() => {
+    void commitCyclingSession(targetTabId, windowId);
+  }, HUD_HOLD_MS);
+
+  if (hudEnabled) await showHud(scope, targetTabId, instant);
   await persist();
 }
 
@@ -318,11 +352,19 @@ chrome.commands.onCommand.addListener((command, tab) => {
   })();
 });
 
-// hud.ts reports back when it actually dismisses (keyup, blur, or its own hold timer
-// expiring), so the "is the next jump a continuation of the same session" check in
-// showHud() reflects ground truth rather than a pure time-elapsed guess.
-chrome.runtime.onMessage.addListener((message: unknown) => {
-  if ((message as { type?: string })?.type === "backtrack-hud-dismissed") {
-    lastHudShownAt = null;
-  }
+// hud.ts reports back whenever it actually dismisses — keyup, blur, or its own local
+// hold timer (kept local so the visual reliably disappears even if this message never
+// arrives). sender.tab.id is compared against currentHudTabId to reject stale reports:
+// each tab's content script instance is independent, so if the user has already cycled
+// on to a newer tab, an old tab's report must not commit a tab that's no longer current.
+// This is what makes release-to-commit near-instant when the HUD is on. commitTimer
+// above is the fallback for when it's off — with no content script running there's no
+// way to detect a key release at all, so a plain elapsed-time commit is the best
+// available signal for "the user stopped cycling."
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+  if ((message as { type?: string })?.type !== "backtrack-hud-dismissed") return;
+  const tabId = sender.tab?.id;
+  const windowId = sender.tab?.windowId;
+  if (tabId === undefined || windowId === undefined || tabId !== currentHudTabId) return;
+  void commitCyclingSession(tabId, windowId);
 });

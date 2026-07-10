@@ -38,6 +38,8 @@ Default bindings:
 
 Alt (Option on Mac) + arrow keys is comfortably reachable with one hand and doesn't carry the risk earlier letter-key choices did — there's no `Cmd+Left`/`Cmd+Right` doing anything destructive on Mac (Chrome's own back/forward-in-page-history shortcut is `Cmd+[`/`Cmd+]`, not arrows), unlike the `Alt+Q`-slipping-to-`Cmd+Q`-quits-the-browser risk that ruled out letter keys under `Alt`. Left/right also doubles as a natural back/forward mnemonic.
 
+A hold-and-cycle (however many steps) counts as one navigation, not a series of independent ones — like walking back through a page's browser history and then clicking a link, only the tab you land on becomes the new "most recent"; anything you stepped past along the way is dropped from the forward direction. This "commit" happens the instant you release Alt (near-instant when the HUD is on, since it can watch for the actual key release; falling back to a few seconds after your last press if the HUD is off, since there's otherwise no way to detect a key release at all). Without this, releasing and pressing back again would keep walking deeper into history from wherever the cursor happened to be, instead of taking one step from the tab you're actually looking at.
+
 Rebind them at `chrome://extensions/shortcuts` — Chrome only allows rebinding a command's shortcut from that page; no extension, including this one, can set it programmatically. Backtrack's options page shows your current bindings and links straight there, plus has a checker where you can press a combo to see if it's on Chrome's known-reserved list (`Ctrl+Tab`, `Ctrl+W`, `Ctrl+T`, etc. — things no extension can ever bind to) before you try setting it.
 
 ## Options
