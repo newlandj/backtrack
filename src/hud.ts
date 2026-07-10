@@ -21,18 +21,21 @@
     items?: HudItem[];
     position?: number;
     total?: number;
+    holdMs?: number;
+    instant?: boolean;
   }
 
-  const win = window as unknown as { __backtrackHud?: { show(items: HudItem[], position: number, total: number): void } };
+  const win = window as unknown as {
+    __backtrackHud?: { show(items: HudItem[], position: number, total: number, holdMs: number, instant: boolean): void };
+  };
   if (win.__backtrackHud) return;
 
   // chrome.commands itself only ever fires on keydown, so there's no built-in signal
   // for "the shortcut was released" — but once the HUD is injected into a real page,
   // we can listen for the physical Alt keyup directly, giving a true hold-to-
-  // preview/release-to-dismiss feel. FALLBACK_HOLD_MS only matters when that keyup
-  // already happened before injection finished (a quick single tap-and-release is
-  // faster than the round trip), so the HUD doesn't otherwise get stuck open.
-  const FALLBACK_HOLD_MS = 1400;
+  // preview/release-to-dismiss feel. The hold duration and whether to skip the entrance
+  // animation both come from background.ts on every message — it's the one place that
+  // decides HUD timing, this file just renders what it's told.
 
   const host = document.createElement("div");
   host.style.all = "initial";
@@ -142,7 +145,6 @@
 
   let hideTimer: number | null = null;
   let isVisible = false;
-  let hasShownOnce = false;
 
   // Same tab always gets the same hue for the session — purely decorative, no favicon
   // pixel-reading required.
@@ -215,9 +217,43 @@
     }
     card.classList.remove("visible");
     isVisible = false;
+    // Tell background.ts the HUD has actually gone away, so its "is this jump a
+    // continuation of the same cycling session" check reflects ground truth instead of
+    // just guessing from elapsed time — e.g. release-then-quickly-press-again should
+    // read as a fresh session, not a continuing one, since the HUD genuinely closed
+    // in between. Swallow errors: if the service worker isn't reachable for a moment
+    // (extension reloading, etc.) this is a best-effort signal, not load-bearing.
+    chrome.runtime.sendMessage({ type: "backtrack-hud-dismissed" }).catch(() => {});
   }
 
-  function show(items: HudItem[], position: number, total: number): void {
+  function appear(instant: boolean): void {
+    if (instant) {
+      // Suppress the transition for exactly one style change so this jump to fully
+      // visible reads as instant rather than replaying the ~240ms entrance animation —
+      // the point of "instant" is to feel like the HUD followed along, not that it
+      // disappeared and popped back in.
+      const prevCardTransition = card.style.transition;
+      const prevBarTransition = accentBar.style.transition;
+      card.style.transition = "none";
+      accentBar.style.transition = "none";
+      card.classList.add("visible");
+      void card.offsetWidth; // force layout so the instant state commits before transitions are restored
+      card.style.transition = prevCardTransition;
+      accentBar.style.transition = prevBarTransition;
+    } else {
+      card.style.opacity = "0";
+      card.style.transform = "translateX(-50%) scale(0.9)";
+      card.style.filter = "blur(6px)";
+      void card.offsetWidth; // force layout so the browser commits the state above before we transition away from it
+      card.style.opacity = "";
+      card.style.transform = "";
+      card.style.filter = "";
+      card.classList.add("visible");
+    }
+    isVisible = true;
+  }
+
+  function show(items: HudItem[], position: number, total: number, holdMs: number, instant: boolean): void {
     render(items, position, total);
 
     if (!host.isConnected) {
@@ -225,22 +261,11 @@
     }
 
     if (!isVisible) {
-      if (!hasShownOnce) {
-        card.style.opacity = "0";
-        card.style.transform = "translateX(-50%) scale(0.9)";
-        card.style.filter = "blur(6px)";
-        void card.offsetWidth; // force layout so the browser commits the state above before we transition away from it
-        card.style.opacity = "";
-        card.style.transform = "";
-        card.style.filter = "";
-        hasShownOnce = true;
-      }
-      card.classList.add("visible");
-      isVisible = true;
+      appear(instant);
     }
 
     if (hideTimer !== null) window.clearTimeout(hideTimer);
-    hideTimer = window.setTimeout(hide, FALLBACK_HOLD_MS);
+    hideTimer = window.setTimeout(hide, holdMs);
   }
 
   win.__backtrackHud = { show };
@@ -265,7 +290,13 @@
   chrome.runtime.onMessage.addListener((message: unknown) => {
     const msg = message as HudMessage;
     if (msg?.type === "backtrack-hud-show" && Array.isArray(msg.items)) {
-      win.__backtrackHud!.show(msg.items, msg.position ?? 1, msg.total ?? msg.items.length);
+      win.__backtrackHud!.show(
+        msg.items,
+        msg.position ?? 1,
+        msg.total ?? msg.items.length,
+        msg.holdMs ?? 3000,
+        msg.instant ?? false,
+      );
     }
   });
 })();

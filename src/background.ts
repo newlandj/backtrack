@@ -120,6 +120,18 @@ interface HudItem {
 
 const HUD_WINDOW_RADIUS = 2;
 
+// How long the HUD stays up if the user doesn't press again. Single source of truth —
+// passed to hud.ts in every message rather than also living as a constant over there,
+// so there's exactly one place that decides HUD timing, not two that have to agree.
+const HUD_HOLD_MS = 3000;
+
+// Tracks whether the most recent showHud() call is still within its hold window, so a
+// subsequent jump can be recognized as a continuation of the same cycling session
+// rather than a fresh one. In-memory only (not persisted) — if the service worker gets
+// evicted for being idle, that idle gap means it genuinely wasn't a continuous session
+// anyway, so treating the next jump as fresh on restart is correct, not a bug.
+let lastHudShownAt: number | null = null;
+
 // chrome.commands only fires on keydown (no keyup signal), so a true hold-to-preview
 // carousel isn't possible here — instead the HUD flashes briefly after each press and
 // fades, giving a lightweight sense of where you are in the stack without that gesture.
@@ -142,6 +154,17 @@ async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
   }
   if (items.length === 0) return;
 
+  // Each new tab is a fresh page with its own separate content-script instance — there's
+  // no way to keep literally the same DOM element following you across a tab switch. But
+  // replaying the ~240ms pop-in animation on every single landing mid-cycle reads as the
+  // HUD "going away and coming back" instead of following along. If the previous HUD
+  // would still be on-screen right now (we're inside its hold window), this jump is
+  // clearly a continuation of the same session, so tell hud.ts to skip the entrance
+  // animation and just appear instantly instead.
+  const now = Date.now();
+  const instant = lastHudShownAt !== null && now - lastHudShownAt < HUD_HOLD_MS;
+  lastHudShownAt = now;
+
   try {
     await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ["dist/hud.js"] });
     await chrome.tabs.sendMessage(currentTabId, {
@@ -149,6 +172,8 @@ async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
       items,
       position: scope.cursor + 1,
       total: scope.stack.length,
+      holdMs: HUD_HOLD_MS,
+      instant,
     });
   } catch (err) {
     // Expected on restricted pages (chrome://, Chrome Web Store, etc.) — the HUD just
@@ -291,4 +316,13 @@ chrome.commands.onCommand.addListener((command, tab) => {
       await goDirection(-1, tab);
     }
   })();
+});
+
+// hud.ts reports back when it actually dismisses (keyup, blur, or its own hold timer
+// expiring), so the "is the next jump a continuation of the same session" check in
+// showHud() reflects ground truth rather than a pure time-elapsed guess.
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  if ((message as { type?: string })?.type === "backtrack-hud-dismissed") {
+    lastHudShownAt = null;
+  }
 });

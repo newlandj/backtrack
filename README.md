@@ -9,7 +9,7 @@ It's built on Chrome's [`chrome.commands`](https://developer.chrome.com/docs/ext
 - **Real N-deep history**, not just a single previous-tab swap. Keep pressing back to walk further into your history; forward retraces your steps.
 - **Works on internal Chrome pages** and anywhere else content scripts can't run.
 - **Global or per-window history**, your choice, via the extension's options page.
-- **A lightweight visual HUD** — a small favicon strip that flashes briefly after each jump so you can see where you landed, then fades away.
+- **A lightweight visual HUD** — a small card naming the tab you landed on, staying up and following along while you keep cycling, and disappearing the instant you release the key.
 - History is kept in `chrome.storage.session`, so it survives the extension's service worker sleeping/restarting, but is cleared when you fully quit Chrome — no stale tab IDs to reconcile after a restart.
 
 ## Install (unpacked, for now)
@@ -50,7 +50,9 @@ Open the extension's **Details → Extension options** from `chrome://extensions
 
 ## Visual HUD
 
-Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap the arrow keys repeatedly to step through your history; the card stays up and updates in place the whole time, and disappears as soon as you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a ~1.4s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap the arrow keys repeatedly to step through your history; the card stays up and follows along the whole time, updating instantly on each new tab rather than replaying its entrance animation — and disappears the instant you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a 3s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+
+Landing on each new tab is technically a brand-new page with its own separate overlay — there's no way to keep literally the same DOM element following you across a tab switch — but skipping the entrance animation for anything but the first tab in a cycling session is what makes it read as one continuous HUD rather than repeatedly popping in and out.
 
 Turn it off entirely in the options page for silent, keyboard-only cycling — useful if you want to compare the two side by side.
 
