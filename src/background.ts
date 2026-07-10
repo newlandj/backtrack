@@ -155,6 +155,47 @@ async function resolveOperatingWindowId(tab?: chrome.tabs.Tab): Promise<number |
   return normalWindows[0]?.id ?? null;
 }
 
+interface HudItem {
+  id: number;
+  title: string;
+  favIconUrl: string;
+  isCurrent: boolean;
+}
+
+const HUD_WINDOW_RADIUS = 3;
+
+// chrome.commands only fires on keydown (no keyup signal), so a true hold-to-preview
+// carousel isn't possible here — instead the HUD flashes briefly after each press and
+// fades, giving a lightweight sense of where you are in the stack without that gesture.
+async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
+  const start = Math.max(0, scope.cursor - HUD_WINDOW_RADIUS);
+  const end = Math.min(scope.stack.length - 1, scope.cursor + HUD_WINDOW_RADIUS);
+  const ids = scope.stack.slice(start, end + 1);
+  const tabs = await Promise.all(ids.map((id) => chrome.tabs.get(id).catch(() => null)));
+
+  const items: HudItem[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const tab = tabs[i];
+    if (!tab) continue;
+    items.push({
+      id: ids[i],
+      title: tab.title ?? "",
+      favIconUrl: tab.favIconUrl ?? "",
+      isCurrent: ids[i] === currentTabId,
+    });
+  }
+  if (items.length === 0) return;
+
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ["dist/hud.js"] });
+    await chrome.tabs.sendMessage(currentTabId, { type: "backtrack-hud-show", items });
+  } catch {
+    // Restricted page (chrome://, Chrome Web Store, etc.) — the HUD just can't render
+    // there. The tab jump itself already succeeded via chrome.tabs.update, which is
+    // the part that actually matters.
+  }
+}
+
 async function jumpToTab(tabId: number): Promise<void> {
   pendingProgrammaticActivation = tabId;
   try {
@@ -177,6 +218,7 @@ async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> 
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
+  await showHud(scope, targetTabId);
   await persist();
 }
 

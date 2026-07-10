@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Backtrack",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Cycle back through your recently active tabs with a keyboard shortcut — works even on chrome:// pages, devtools, and the omnibox.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "dist/background.js",
     "type": "module"

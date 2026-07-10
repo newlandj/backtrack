@@ -9,7 +9,7 @@ It's built on Chrome's [`chrome.commands`](https://developer.chrome.com/docs/ext
 - **Real N-deep history**, not just a single previous-tab swap. Keep pressing back to walk further into your history; forward retraces your steps.
 - **Works on internal Chrome pages** and anywhere else content scripts can't run.
 - **Global or per-window history**, your choice, via the extension's options page.
-- **Minimal permissions** — only `storage`, nothing that touches tab URLs or content.
+- **A lightweight visual HUD** — a small favicon strip that flashes briefly after each jump so you can see where you landed, then fades away.
 - History is kept in `chrome.storage.session`, so it survives the extension's service worker sleeping/restarting, but is cleared when you fully quit Chrome — no stale tab IDs to reconcile after a restart.
 
 ## Install (unpacked, for now)
@@ -47,6 +47,15 @@ Open the extension's **Details → Extension options** from `chrome://extensions
 
 Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
 
+## Visual HUD
+
+`chrome.commands` only fires on keydown — there's no keyup signal, so a true hold-modifier-to-preview carousel (like OS-level Alt-Tab) isn't possible here. Instead, each go-back/go-forward press briefly shows a small favicon strip near the bottom of the page indicating where you landed in your history, then fades out after about 1.4 seconds. It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+
+## Permissions
+
+- `storage` — for the MRU stack and your options.
+- `scripting` + `host_permissions: ["<all_urls>"]` — needed to inject the HUD overlay into the tab you just jumped to (it's not the tab your keypress originated on, so `activeTab` doesn't cover it) and to read that tab's title/favicon for the HUD. If you'd rather avoid granting this permission, everything else about Backtrack works fine without it — see [`DEV_PLAN.md`](DEV_PLAN.md) if you want to strip the HUD back out.
+
 ## Development
 
 ```sh
@@ -61,11 +70,13 @@ There's no automated test suite — this is a small, five-file extension best ve
 
 - No tab search or fuzzy matching over tabs/bookmarks/history.
 - No tab management (grouping, saving sessions, closing tabs).
-- No visual "carousel" HUD while cycling — this was considered (see `DEV_PLAN.md`) but is a documented future idea, not implemented.
+- No true hold-modifier-to-preview carousel — see the Visual HUD section above for why.
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase (`src/background.ts` for the core MRU logic, `src/options.ts` for the options page) — read through `DEV_PLAN.md` for the reasoning behind the trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) before diving in.
+Issues and PRs welcome. It's a small codebase (`src/background.ts` for the core MRU logic, `src/options.ts` for the options page, `src/hud.ts` for the visual overlay) — read through `DEV_PLAN.md` for the reasoning behind the trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) before diving in.
+
+All changes to `main` go through a pull request, and CI (`npm run build` + a manifest sanity check) must pass before merging.
 
 ## License
 

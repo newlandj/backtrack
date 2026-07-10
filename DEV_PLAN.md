@@ -22,7 +22,7 @@ A minimal Chrome extension (Manifest V3) that lets you cycle back through recent
 2. **v0.2 — Real MRU stack.** Replace the 2-slot swap with an N-deep stack. Repeated presses of "back" walk further back through history; "forward" walks toward more recent.
 3. **v0.3 — Persistence.** Stack survives service worker sleep/restart and (if decided) full browser restart.
 4. **v0.4 — Special-page + edge-case hardening.** Test and fix behavior on `chrome://` pages, PDF viewer, devtools-focused windows, incognito windows, multi-window setups.
-5. **v0.5 (optional) — Visual HUD.** Only if the hold/release interaction problem below is resolved satisfactorily.
+5. **v0.5 — Visual HUD.** Implemented as a flash-and-fade favicon strip rather than a true hold/release carousel — see resolution of open question 1 below.
 
 ## Manifest sketch
 ```json
@@ -46,10 +46,8 @@ A minimal Chrome extension (Manifest V3) that lets you cycle back through recent
 ```
 Note: Chrome reserves `Ctrl+Tab` and won't let extensions bind it directly — `suggested_key` defaults are just a starting point, real bindings live in `chrome://extensions/shortcuts`.
 
-## Open questions for Claude Code to resolve
-1. **Hold-to-preview UX may not be feasible as described.** The "hold modifier, tap to step through, release to commit" interaction (like OS-level Alt-Tab) needs a keyup event. `chrome.commands` only fires on keydown — there's no built-in keyup signal when a command shortcut is released. Two paths:
-   - **(a) Simpler v1 (recommended to start):** each keypress immediately jumps to the next tab in the stack, no hold-and-preview, no visual required. Matches "keep it very simple." Ships faster and sidesteps the API limitation entirely.
-   - **(b) True hold/release:** requires a content script listening for keyup globally, which needs broader host permissions and won't work on `chrome://` pages anyway — undercutting the "works everywhere" differentiator. Worth prototyping only after (a) ships, if Josh still wants the carousel.
+## Open questions — resolved
+1. **Hold-to-preview UX is not feasible as described; resolved as flash-and-fade instead.** The "hold modifier, tap to step through, release to commit" interaction (like OS-level Alt-Tab) needs a keyup event, and `chrome.commands` only fires on keydown — there's no built-in keyup signal when a shortcut is released. v0.1–v0.4 shipped with path (a): each keypress immediately jumps, no visual. v0.5 added a lightweight compromise: after each jump, `chrome.scripting.executeScript` injects `dist/hud.js` into the tab just landed on, which renders a small favicon strip (via `chrome.tabs.sendMessage`) that fades out after ~1.4s of inactivity — giving positional feedback without needing the keyup signal. This required adding `scripting` + `host_permissions: ["<all_urls>"]` (the target tab isn't the one the keypress originated on, so `activeTab` doesn't cover it), a deliberate tradeoff against the "minimal permission footprint" differentiator called out in `SUMMARY.md` — worth it for the visual feedback, but flagged here since it's exactly the kind of permission bloat the competitive research flagged as a gap to avoid. As predicted, it doesn't render on `chrome://` pages or other restricted schemes (the injection fails silently, caught and ignored) — the tab jump itself is unaffected there, since it never depended on the HUD succeeding.
 2. **Per-window or global MRU stack?** Global is more useful for people who spread work across multiple windows; per-window is simpler and matches how most competitors (BackTab, etc.) behave.
 3. **Persist across full browser restart, or just service-worker sleep?** `chrome.storage.local` gives full persistence; adds complexity in reconciling stack tab IDs with tabs that may no longer exist after restart.
 4. **Final extension name** — Backtrack is available on the Chrome Web Store as of this research; confirm still available at publish time (names can be claimed between now and launch).
