@@ -162,7 +162,7 @@ interface HudItem {
   isCurrent: boolean;
 }
 
-const HUD_WINDOW_RADIUS = 3;
+const HUD_WINDOW_RADIUS = 2;
 
 // chrome.commands only fires on keydown (no keyup signal), so a true hold-to-preview
 // carousel isn't possible here — instead the HUD flashes briefly after each press and
@@ -188,7 +188,12 @@ async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
 
   try {
     await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ["dist/hud.js"] });
-    await chrome.tabs.sendMessage(currentTabId, { type: "backtrack-hud-show", items });
+    await chrome.tabs.sendMessage(currentTabId, {
+      type: "backtrack-hud-show",
+      items,
+      position: scope.cursor + 1,
+      total: scope.stack.length,
+    });
   } catch {
     // Restricted page (chrome://, Chrome Web Store, etc.) — the HUD just can't render
     // there. The tab jump itself already succeeded via chrome.tabs.update, which is

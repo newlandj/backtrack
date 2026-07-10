@@ -49,7 +49,7 @@ Switching modes resets your current back/forward history (there's no well-define
 
 ## Visual HUD
 
-`chrome.commands` only fires on keydown — there's no keyup signal, so a true hold-modifier-to-preview carousel (like OS-level Alt-Tab) isn't possible here. Instead, each go-back/go-forward press briefly shows a small favicon strip near the bottom of the page indicating where you landed in your history, then fades out after about 1.4 seconds. It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+`chrome.commands` only fires on keydown — there's no keyup signal, so a true hold-modifier-to-preview carousel (like OS-level Alt-Tab) isn't possible here. Instead, each go-back/go-forward press briefly shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter — then fades out after about 1.4 seconds. Pressing again while it's still visible updates it in place rather than re-animating. It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
 
 ## Permissions
 
