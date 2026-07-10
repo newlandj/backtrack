@@ -19,8 +19,8 @@ interface HudMessage {
 }
 
 // chrome.commands itself only ever fires on keydown, but once the HUD is injected into
-// a real page we can listen for the physical Alt keyup directly — giving the
-// hold-Alt-to-preview/release-to-dismiss behavior the original DEV_PLAN.md flagged as
+// a real page we can listen for the physical Ctrl keyup directly — giving the
+// hold-Ctrl-to-preview/release-to-dismiss behavior the original DEV_PLAN.md flagged as
 // needing a content script with broader permissions, which v0.5 already pays for.
 // FALLBACK_HOLD_MS only matters when that keyup already happened before injection
 // finished (a quick single tap-and-release is faster than the round trip), so the HUD
@@ -241,18 +241,18 @@ if (!win.__backtrackHud) {
 
   win.__backtrackHud = { show };
 
-  // Primary dismiss path: the user releases Alt. Capture-phase so a page that stops
+  // Primary dismiss path: the user releases Ctrl. Capture-phase so a page that stops
   // propagation on bubble (e.g. a framework's global key handler) can't swallow it.
   window.addEventListener(
     "keyup",
     (e) => {
-      if (e.key === "Alt" && isVisible) hide();
+      if (e.key === "Control" && isVisible) hide();
     },
     true,
   );
 
-  // If focus leaves the page/window entirely while cycling (alt-tabbing to another
-  // app, a native dialog stealing focus), we won't get a keyup for Alt at all — hide
+  // If focus leaves the page/window entirely while cycling (switching to another app,
+  // a native dialog stealing focus), we won't get a keyup for Ctrl at all — hide
   // rather than leave the HUD stuck open.
   window.addEventListener("blur", () => {
     if (isVisible) hide();
