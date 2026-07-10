@@ -8,11 +8,14 @@ interface ScopeState {
 }
 
 const DEFAULT_SCOPE_MODE: ScopeMode = "global";
+const DEFAULT_HUD_ENABLED = true;
 const MAX_STACK_DEPTH = 50;
 const SESSION_STORAGE_KEY = "scopeState";
 const LOCAL_STORAGE_MODE_KEY = "scopeMode";
+const LOCAL_STORAGE_HUD_ENABLED_KEY = "hudEnabled";
 
 let scopeMode: ScopeMode = DEFAULT_SCOPE_MODE;
+let hudEnabled: boolean = DEFAULT_HUD_ENABLED;
 let scopes: Map<string, ScopeState> = new Map();
 let lastFocusedNormalWindowId: number | null = null;
 
@@ -28,8 +31,9 @@ function ensureLoaded(): Promise<void> {
 }
 
 async function loadState(): Promise<void> {
-  const local = await chrome.storage.local.get(LOCAL_STORAGE_MODE_KEY);
+  const local = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_HUD_ENABLED_KEY]);
   scopeMode = (local[LOCAL_STORAGE_MODE_KEY] as ScopeMode | undefined) ?? DEFAULT_SCOPE_MODE;
+  hudEnabled = (local[LOCAL_STORAGE_HUD_ENABLED_KEY] as boolean | undefined) ?? DEFAULT_HUD_ENABLED;
 
   const session = await chrome.storage.session.get(SESSION_STORAGE_KEY);
   const raw = session[SESSION_STORAGE_KEY] as Record<string, ScopeState> | undefined;
@@ -226,7 +230,7 @@ async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> 
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
-  await showHud(scope, targetTabId);
+  if (hudEnabled) await showHud(scope, targetTabId);
   await persist();
 }
 
@@ -253,10 +257,11 @@ async function resetAndReseedAllScopes(): Promise<void> {
 
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    const stored = await chrome.storage.local.get(LOCAL_STORAGE_MODE_KEY);
-    if (!stored[LOCAL_STORAGE_MODE_KEY]) {
-      await chrome.storage.local.set({ [LOCAL_STORAGE_MODE_KEY]: DEFAULT_SCOPE_MODE });
-    }
+    const stored = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_HUD_ENABLED_KEY]);
+    const defaults: Record<string, unknown> = {};
+    if (!stored[LOCAL_STORAGE_MODE_KEY]) defaults[LOCAL_STORAGE_MODE_KEY] = DEFAULT_SCOPE_MODE;
+    if (stored[LOCAL_STORAGE_HUD_ENABLED_KEY] === undefined) defaults[LOCAL_STORAGE_HUD_ENABLED_KEY] = DEFAULT_HUD_ENABLED;
+    if (Object.keys(defaults).length > 0) await chrome.storage.local.set(defaults);
   })();
 });
 
@@ -308,13 +313,20 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local" || !changes[LOCAL_STORAGE_MODE_KEY]) return;
-  void (async () => {
-    await ensureLoaded();
-    scopeMode = (changes[LOCAL_STORAGE_MODE_KEY].newValue as ScopeMode) ?? DEFAULT_SCOPE_MODE;
-    await resetAndReseedAllScopes();
-    await persist();
-  })();
+  if (areaName !== "local") return;
+
+  if (changes[LOCAL_STORAGE_HUD_ENABLED_KEY]) {
+    hudEnabled = (changes[LOCAL_STORAGE_HUD_ENABLED_KEY].newValue as boolean | undefined) ?? DEFAULT_HUD_ENABLED;
+  }
+
+  if (changes[LOCAL_STORAGE_MODE_KEY]) {
+    void (async () => {
+      await ensureLoaded();
+      scopeMode = (changes[LOCAL_STORAGE_MODE_KEY].newValue as ScopeMode) ?? DEFAULT_SCOPE_MODE;
+      await resetAndReseedAllScopes();
+      await persist();
+    })();
+  }
 });
 
 chrome.commands.onCommand.addListener((command, tab) => {

@@ -30,6 +30,11 @@
         color: #2a7a2a;
         min-height: 14px;
       }
+      hr {
+        border: none;
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
+        margin: 16px 0;
+      }
     </style>
   </head>
   <body>
@@ -41,6 +46,18 @@
       When unchecked, each window keeps its own separate back/forward history instead.
       Switching this setting resets your current back/forward history.
     </p>
+
+    <hr />
+
+    <label>
+      <input type="checkbox" id="hud-enabled-checkbox" />
+      <span>Show visual HUD while cycling</span>
+    </label>
+    <p class="hint">
+      A small card showing the tab you landed on. Turn off for silent, keyboard-only
+      cycling with no on-page visual.
+    </p>
+
     <p class="status" id="status"></p>
     <script type="module" src="dist/options.js"></script>
   </body>

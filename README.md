@@ -40,16 +40,16 @@ Rebind them at `chrome://extensions/shortcuts`. Alt (Option on Mac) + arrow keys
 
 ## Options
 
-Open the extension's **Details → Extension options** from `chrome://extensions` to toggle between:
+Open the extension's **Details → Extension options** from `chrome://extensions` to toggle:
 
-- **Global history** (default) — one shared back/forward history across all your windows.
-- **Per-window history** — each window keeps its own separate history.
-
-Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
+- **Global vs. per-window history** — global (default) is one shared back/forward history across all your windows; per-window gives each window its own separate history. Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
+- **Visual HUD on/off** — see below. Defaults to on.
 
 ## Visual HUD
 
 Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap the arrow keys repeatedly to step through your history; the card stays up and updates in place the whole time, and disappears as soon as you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a ~1.4s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+
+Turn it off entirely in the options page for silent, keyboard-only cycling — useful if you want to compare the two side by side.
 
 ## Permissions
 
