@@ -54,7 +54,7 @@ Turn it off entirely in the options page for silent, keyboard-only cycling — u
 ## Permissions
 
 - `storage` — for the MRU stack and your options.
-- `scripting` + `host_permissions: ["<all_urls>"]` — needed to inject the HUD overlay into the tab you just jumped to (it's not the tab your keypress originated on, so `activeTab` doesn't cover it) and to read that tab's title/favicon for the HUD. If you'd rather avoid granting this permission, everything else about Backtrack works fine without it — see [`DEV_PLAN.md`](DEV_PLAN.md) if you want to strip the HUD back out.
+- `scripting` + `host_permissions: ["<all_urls>"]` — needed to inject the HUD overlay into the tab you just jumped to (it's not the tab your keypress originated on, so `activeTab` doesn't cover it) and to read that tab's title/favicon for the HUD. Requested at install regardless of the HUD's on/off state below, since it can be toggled back on at any time — but nothing actually uses it while the HUD is off, and cycling itself works identically either way.
 
 ## Development
 
@@ -64,7 +64,13 @@ npm run watch   # recompiles src/*.ts to dist/ on every save
 
 After a rebuild, click the reload icon on Backtrack's card at `chrome://extensions` to pick up the change.
 
-There's no automated test suite — this is a small, five-file extension best verified by hand. See `DEV_PLAN.md` for the manual test matrix (multi-window setups, incognito, DevTools-focused windows, closing a tab mid-history, etc.) used during development.
+There's no automated test suite — this is a small extension best verified by hand. Worth walking through after a nontrivial change:
+
+- Normal http(s) tabs, `chrome://` internal pages, and a PDF viewer tab (cycling should work identically on all three; the HUD only renders on the first).
+- A DevTools-focused window, and multiple browser windows open at once (try both the global and per-window options).
+- Incognito, if you've enabled "Allow in Incognito" for the extension.
+- Closing a tab that's mid-history, then continuing to cycle — it should skip the closed tab cleanly.
+- Reload the service worker (the "service worker" inspect link on the extension's card) mid-session and confirm history survives; fully quit and relaunch Chrome and confirm it doesn't (by design).
 
 ## Non-goals
 
@@ -73,7 +79,7 @@ There's no automated test suite — this is a small, five-file extension best ve
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase (`src/background.ts` for the core MRU logic, `src/options.ts` for the options page, `src/hud.ts` for the visual overlay) — read through `DEV_PLAN.md` for the reasoning behind the trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) before diving in.
+Issues and PRs welcome. It's a small codebase: `src/background.ts` for the core MRU logic, `src/options.ts` for the options page, `src/hud.ts` for the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
 
 All changes to `main` go through a pull request, and CI (`npm run build` + a manifest sanity check) must pass before merging.
 

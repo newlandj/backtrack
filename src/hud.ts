@@ -18,13 +18,12 @@ interface HudMessage {
   total?: number;
 }
 
-// chrome.commands itself only ever fires on keydown, but once the HUD is injected into
-// a real page we can listen for the physical Alt keyup directly — giving the
-// hold-Alt-to-preview/release-to-dismiss behavior the original DEV_PLAN.md flagged as
-// needing a content script with broader permissions, which v0.5 already pays for.
-// FALLBACK_HOLD_MS only matters when that keyup already happened before injection
-// finished (a quick single tap-and-release is faster than the round trip), so the HUD
-// doesn't otherwise get stuck open.
+// chrome.commands itself only ever fires on keydown, so there's no built-in signal for
+// "the shortcut was released" — but once the HUD is injected into a real page, we can
+// listen for the physical Alt keyup directly, giving a true hold-to-preview/release-to-
+// dismiss feel. FALLBACK_HOLD_MS only matters when that keyup already happened before
+// injection finished (a quick single tap-and-release is faster than the round trip), so
+// the HUD doesn't otherwise get stuck open.
 const FALLBACK_HOLD_MS = 1400;
 
 const win = window as unknown as { __backtrackHud?: { show(items: HudItem[], position: number, total: number): void } };
