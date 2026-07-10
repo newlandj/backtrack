@@ -1,34 +1,39 @@
-// No `export {}` here, unlike background.ts/options.ts: chrome.scripting.executeScript's
-// files-based injection loads this as a classic script, not an ES module, and a
-// top-level `export` is a syntax error there (fails to parse, so nothing in this file
-// runs at all). Everything below lives inside the `if` block's own scope, so leaving
-// this as a global script doesn't collide with the other files' top-level names.
+// Wrapped in an IIFE — not just `export {}`-less, but no top-level `const`/`let` at
+// all. chrome.scripting.executeScript's files-based injection runs in the *same
+// persistent* isolated-world scope every time this file is re-injected into a given
+// tab (e.g. cycling back to a tab that's already had the HUD once), so any top-level
+// `const` here would throw "Identifier has already been declared" on the second
+// injection — a SyntaxError that fails before a single line of this file runs,
+// including the idempotency guard below. Putting everything inside the IIFE's own
+// function scope means each injection gets fresh locals with nothing to collide with;
+// only `window.__backtrackHud` needs to persist across injections, and it does, since
+// `window` itself isn't re-created.
+(function () {
+  interface HudItem {
+    id: number;
+    title: string;
+    favIconUrl: string;
+    isCurrent: boolean;
+  }
 
-interface HudItem {
-  id: number;
-  title: string;
-  favIconUrl: string;
-  isCurrent: boolean;
-}
+  interface HudMessage {
+    type?: string;
+    items?: HudItem[];
+    position?: number;
+    total?: number;
+  }
 
-interface HudMessage {
-  type?: string;
-  items?: HudItem[];
-  position?: number;
-  total?: number;
-}
+  const win = window as unknown as { __backtrackHud?: { show(items: HudItem[], position: number, total: number): void } };
+  if (win.__backtrackHud) return;
 
-// chrome.commands itself only ever fires on keydown, so there's no built-in signal for
-// "the shortcut was released" — but once the HUD is injected into a real page, we can
-// listen for the physical Alt keyup directly, giving a true hold-to-preview/release-to-
-// dismiss feel. FALLBACK_HOLD_MS only matters when that keyup already happened before
-// injection finished (a quick single tap-and-release is faster than the round trip), so
-// the HUD doesn't otherwise get stuck open.
-const FALLBACK_HOLD_MS = 1400;
+  // chrome.commands itself only ever fires on keydown, so there's no built-in signal
+  // for "the shortcut was released" — but once the HUD is injected into a real page,
+  // we can listen for the physical Alt keyup directly, giving a true hold-to-
+  // preview/release-to-dismiss feel. FALLBACK_HOLD_MS only matters when that keyup
+  // already happened before injection finished (a quick single tap-and-release is
+  // faster than the round trip), so the HUD doesn't otherwise get stuck open.
+  const FALLBACK_HOLD_MS = 1400;
 
-const win = window as unknown as { __backtrackHud?: { show(items: HudItem[], position: number, total: number): void } };
-
-if (!win.__backtrackHud) {
   const host = document.createElement("div");
   host.style.all = "initial";
 
@@ -263,4 +268,4 @@ if (!win.__backtrackHud) {
       win.__backtrackHud!.show(msg.items, msg.position ?? 1, msg.total ?? msg.items.length);
     }
   });
-}
+})();
