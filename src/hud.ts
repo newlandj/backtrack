@@ -1,4 +1,8 @@
-export {};
+// No `export {}` here, unlike background.ts/options.ts: chrome.scripting.executeScript's
+// files-based injection loads this as a classic script, not an ES module, and a
+// top-level `export` is a syntax error there (fails to parse, so nothing in this file
+// runs at all). Everything below lives inside the `if` block's own scope, so leaving
+// this as a global script doesn't collide with the other files' top-level names.
 
 interface HudItem {
   id: number;

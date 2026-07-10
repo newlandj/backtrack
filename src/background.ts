@@ -194,10 +194,13 @@ async function showHud(scope: ScopeState, currentTabId: number): Promise<void> {
       position: scope.cursor + 1,
       total: scope.stack.length,
     });
-  } catch {
-    // Restricted page (chrome://, Chrome Web Store, etc.) — the HUD just can't render
-    // there. The tab jump itself already succeeded via chrome.tabs.update, which is
-    // the part that actually matters.
+  } catch (err) {
+    // Expected on restricted pages (chrome://, Chrome Web Store, etc.) — the HUD just
+    // can't render there. Logged (not swallowed silently) so real bugs — a missing
+    // dist/hud.js build, a permissions issue — are visible in the service worker
+    // console instead of failing invisibly. The tab jump itself already succeeded via
+    // chrome.tabs.update, which is the part that actually matters.
+    console.debug("Backtrack: HUD injection skipped for tab", currentTabId, err);
   }
 }
 
