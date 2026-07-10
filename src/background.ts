@@ -1,4 +1,5 @@
 import { type ScopeMode, type ScopeState, getScopeKey, recordActivation, removeTabFromScope, stepScope } from "./mru.js";
+import { type HudSessionState, createHudSessionState, beginHudSession, attemptCommit } from "./hudSession.js";
 
 const DEFAULT_SCOPE_MODE: ScopeMode = "global";
 const DEFAULT_HUD_ENABLED = true;
@@ -126,11 +127,9 @@ const HUD_WINDOW_RADIUS = 2;
 // timing, not two that have to agree.
 const HUD_HOLD_MS = 3000;
 
-// Which tab currently "owns" the active cycling session, for two purposes: (1) deciding
-// whether the next jump is a continuation (skip the HUD's entrance animation) or fresh,
-// and (2) knowing which tab to commit — i.e. promote to the front of the MRU stack,
-// discarding the "forward" entries past it — once the session ends. In-memory only.
-let currentHudTabId: number | null = null;
+// Tracks which tab currently "owns" the active cycling session — see hudSession.ts for
+// the (independently unit-tested) decision logic. In-memory only.
+const hudSession: HudSessionState = createHudSessionState();
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
 
 function cancelPendingCommit(): void {
@@ -152,7 +151,7 @@ function cancelPendingCommit(): void {
 // tab switch to that tab.
 async function commitCyclingSession(tabId: number, windowId: number): Promise<void> {
   cancelPendingCommit();
-  if (currentHudTabId === tabId) currentHudTabId = null;
+  if (!attemptCommit(hudSession, tabId)) return; // stale — session has already moved on
   await ensureLoaded();
   const scope = getOrCreateScope(getScopeKey(scopeMode, windowId));
   recordActivation(scope, tabId);
@@ -224,10 +223,7 @@ async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> 
 
   await jumpToTab(targetTabId);
 
-  // If we're already mid-session (currentHudTabId set from a previous jump that hasn't
-  // committed yet), this jump continues it — otherwise it starts a new one.
-  const instant = currentHudTabId !== null;
-  currentHudTabId = targetTabId;
+  const instant = beginHudSession(hudSession, targetTabId);
 
   // The previous tab's own pending commit (if any) is superseded now that we've moved
   // on — this new tab owns the session instead. Schedule its own fallback commit: if
@@ -354,17 +350,17 @@ chrome.commands.onCommand.addListener((command, tab) => {
 
 // hud.ts reports back whenever it actually dismisses — keyup, blur, or its own local
 // hold timer (kept local so the visual reliably disappears even if this message never
-// arrives). sender.tab.id is compared against currentHudTabId to reject stale reports:
-// each tab's content script instance is independent, so if the user has already cycled
-// on to a newer tab, an old tab's report must not commit a tab that's no longer current.
-// This is what makes release-to-commit near-instant when the HUD is on. commitTimer
-// above is the fallback for when it's off — with no content script running there's no
-// way to detect a key release at all, so a plain elapsed-time commit is the best
-// available signal for "the user stopped cycling."
+// arrives). commitCyclingSession rejects it via attemptCommit if the reporting tab is no
+// longer the one that owns the session — each tab's content script instance is
+// independent, so if the user has already cycled on to a newer tab, an old tab's report
+// must not commit a tab that's no longer current. This is what makes release-to-commit
+// near-instant when the HUD is on. commitTimer above is the fallback for when it's off —
+// with no content script running there's no way to detect a key release at all, so a
+// plain elapsed-time commit is the best available signal for "the user stopped cycling."
 chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   if ((message as { type?: string })?.type !== "backtrack-hud-dismissed") return;
   const tabId = sender.tab?.id;
   const windowId = sender.tab?.windowId;
-  if (tabId === undefined || windowId === undefined || tabId !== currentHudTabId) return;
+  if (tabId === undefined || windowId === undefined) return;
   void commitCyclingSession(tabId, windowId);
 });

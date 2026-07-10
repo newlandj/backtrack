@@ -77,7 +77,7 @@ After a rebuild, click the reload icon on Backtrack's card at `chrome://extensio
 npm test
 ```
 
-Runs on [Node's built-in test runner](https://nodejs.org/api/test.html) — no test framework dependency. Coverage is intentionally narrow: it's the pure, dependency-free logic factored out of the two trickiest files — `src/mru.ts` (the MRU stack's wraparound/stepping/pruning algorithm, imported by `background.ts`) and `src/shortcutMatch.ts` (the options page's reserved-shortcut checker, imported by `options.ts`). Both are plain functions with no `chrome.*` or DOM calls, so they run directly under Node.
+Runs on [Node's built-in test runner](https://nodejs.org/api/test.html) — no test framework dependency. Coverage is intentionally narrow: it's the pure, dependency-free logic factored out of the trickiest parts of the codebase — `src/mru.ts` (the MRU stack's wraparound/stepping/pruning algorithm), `src/hudSession.ts` (the state machine deciding whether a jump continues an active cycling session or starts a fresh one, and which tab a session commits when it ends), and `src/shortcutMatch.ts` (the options page's reserved-shortcut checker). All three are plain functions/objects with no `chrome.*` or DOM calls, imported by `background.ts`/`options.ts` and exercised directly under Node. When a bug like this turns up, extracting the relevant piece into one of these files (or a new one) and writing a regression test for it first is the expected move, not an afterthought.
 
 What's *not* covered, and has to stay a manual check, is everything that actually talks to Chrome — `background.ts`'s event listeners, `chrome.storage`/`chrome.tabs`/`chrome.scripting` calls, and `hud.ts`'s DOM rendering. Worth walking through by hand after a nontrivial change:
 
@@ -94,7 +94,7 @@ What's *not* covered, and has to stay a manual check, is everything that actuall
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase: `src/mru.ts` and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack up to Chrome's APIs, `src/options.ts` does the same for the options page, and `src/hud.ts` is the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
+Issues and PRs welcome. It's a small codebase: `src/mru.ts`, `src/hudSession.ts`, and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack and HUD session tracking up to Chrome's APIs, `src/options.ts` does the same for the options page, and `src/hud.ts` is the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
 
 All changes to `main` go through a pull request, and CI (`npm test` + a manifest sanity check) must pass before merging.
 
