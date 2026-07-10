@@ -114,23 +114,34 @@ async function tabStillExists(tabId: number): Promise<boolean> {
   }
 }
 
-// Walks `delta` steps from the current cursor, skipping over (and pruning) any stale
-// tab IDs it encounters, and returns the first live tab found or null if the stack is
-// exhausted in that direction.
+// Walks `delta` (always ±1) steps from the current cursor, wrapping around either end
+// of the stack rather than stopping — reaching the oldest entry and pressing back again
+// lands back on the most recent, and vice versa. Skips over (and eventually prunes) any
+// stale tab IDs it encounters along the way. Returns the first live tab found, or null
+// only if every tab in the stack is gone (a pathological case — onRemoved should
+// already have pruned closed tabs as they closed).
 async function stepScope(scope: ScopeState, delta: number): Promise<number | null> {
-  let idx = scope.cursor + delta;
-  while (idx >= 0 && idx < scope.stack.length) {
-    const candidate = scope.stack[idx];
-    if (await tabStillExists(candidate)) {
-      scope.cursor = idx;
-      return candidate;
+  const total = scope.stack.length;
+  if (total === 0) return null;
+
+  const staleIds = new Set<number>();
+  let idx = (((scope.cursor + delta) % total) + total) % total;
+
+  for (let attempts = 0; attempts < total; attempts++) {
+    const candidateId = scope.stack[idx];
+    if (await tabStillExists(candidateId)) {
+      if (staleIds.size > 0) {
+        scope.stack = scope.stack.filter((id) => !staleIds.has(id));
+      }
+      scope.cursor = scope.stack.indexOf(candidateId);
+      return candidateId;
     }
-    scope.stack.splice(idx, 1);
-    if (idx < scope.cursor) {
-      scope.cursor -= 1;
-      idx -= 1;
-    }
+    staleIds.add(candidateId);
+    idx = ((idx + delta) % total + total) % total;
   }
+
+  scope.stack = scope.stack.filter((id) => !staleIds.has(id));
+  scope.cursor = Math.max(0, Math.min(scope.cursor, scope.stack.length - 1));
   return null;
 }
 
