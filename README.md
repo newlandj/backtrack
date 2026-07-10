@@ -67,7 +67,15 @@ npm run watch   # recompiles src/*.ts to dist/ on every save
 
 After a rebuild, click the reload icon on Backtrack's card at `chrome://extensions` to pick up the change.
 
-There's no automated test suite — this is a small extension best verified by hand. Worth walking through after a nontrivial change:
+### Tests
+
+```sh
+npm test
+```
+
+Runs on [Node's built-in test runner](https://nodejs.org/api/test.html) — no test framework dependency. Coverage is intentionally narrow: it's the pure, dependency-free logic factored out of the two trickiest files — `src/mru.ts` (the MRU stack's wraparound/stepping/pruning algorithm, imported by `background.ts`) and `src/shortcutMatch.ts` (the options page's reserved-shortcut checker, imported by `options.ts`). Both are plain functions with no `chrome.*` or DOM calls, so they run directly under Node.
+
+What's *not* covered, and has to stay a manual check, is everything that actually talks to Chrome — `background.ts`'s event listeners, `chrome.storage`/`chrome.tabs`/`chrome.scripting` calls, and `hud.ts`'s DOM rendering. Worth walking through by hand after a nontrivial change:
 
 - Normal http(s) tabs, `chrome://` internal pages, and a PDF viewer tab (cycling should work identically on all three; the HUD only renders on the first).
 - A DevTools-focused window, and multiple browser windows open at once (try both the global and per-window options).
@@ -82,9 +90,9 @@ There's no automated test suite — this is a small extension best verified by h
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase: `src/background.ts` for the core MRU logic, `src/options.ts` for the options page, `src/hud.ts` for the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
+Issues and PRs welcome. It's a small codebase: `src/mru.ts` and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack up to Chrome's APIs, `src/options.ts` does the same for the options page, and `src/hud.ts` is the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
 
-All changes to `main` go through a pull request, and CI (`npm run build` + a manifest sanity check) must pass before merging.
+All changes to `main` go through a pull request, and CI (`npm test` + a manifest sanity check) must pass before merging.
 
 ## License
 

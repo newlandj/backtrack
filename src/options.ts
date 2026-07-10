@@ -1,4 +1,4 @@
-export {};
+import { evaluateShortcut } from "./shortcutMatch.js";
 
 const LOCAL_STORAGE_MODE_KEY = "scopeMode";
 const DEFAULT_SCOPE_MODE = "global";
@@ -59,57 +59,28 @@ openShortcutsBtn.addEventListener("click", () => {
   void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
 });
 
-// Known reserved at the browser-chrome level — extensions cannot bind to these
-// regardless of what a user tries to set in chrome://extensions/shortcuts. Not
-// exhaustive: Chrome doesn't publish a full list, and it can vary slightly by platform.
-const RESERVED_SHORTCUTS = new Set([
-  "Ctrl+Tab",
-  "Ctrl+Shift+Tab",
-  "Ctrl+N",
-  "Ctrl+T",
-  "Ctrl+W",
-  "Ctrl+Shift+N",
-  "Ctrl+Shift+T",
-]);
-
-function normalizeKey(key: string): string | null {
-  if (key === "Control" || key === "Alt" || key === "Shift" || key === "Meta") return null;
-  if (key === "ArrowLeft") return "Left";
-  if (key === "ArrowRight") return "Right";
-  if (key === "ArrowUp") return "Up";
-  if (key === "ArrowDown") return "Down";
-  if (key === ",") return "Comma";
-  if (key === ".") return "Period";
-  if (key === " ") return "Space";
-  if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase();
-  if (/^F([1-9]|1[0-2])$/.test(key)) return key;
-  return key;
-}
-
 shortcutTester.addEventListener("keydown", (e) => {
   e.preventDefault();
 
-  const modifiers: string[] = [];
-  if (e.ctrlKey) modifiers.push("Ctrl");
-  if (e.altKey) modifiers.push("Alt");
-  if (e.shiftKey) modifiers.push("Shift");
-  if (e.metaKey) modifiers.push("Cmd");
+  const result = evaluateShortcut(e);
+  if (result.skip) return; // a lone modifier press; wait for the full combo
 
-  const key = normalizeKey(e.key);
-  if (key === null) return; // a lone modifier press; wait for the full combo
+  shortcutTester.value = result.combo;
 
-  const combo = [...modifiers, key].join("+");
-  shortcutTester.value = combo;
-
-  if (modifiers.includes("Cmd")) {
-    shortcutTesterResult.textContent =
-      "Cmd isn't used as Backtrack's cross-platform modifier — Ctrl/Alt/Shift map automatically per OS instead.";
-  } else if (modifiers.length === 0) {
-    shortcutTesterResult.textContent = "Needs at least one modifier key (Ctrl, Alt, or Shift).";
-  } else if (RESERVED_SHORTCUTS.has(combo)) {
-    shortcutTesterResult.textContent = `⚠️ ${combo} is reserved by Chrome — no extension can bind to it.`;
-  } else {
-    shortcutTesterResult.textContent = `${combo} isn't on the known-reserved list — try setting it at chrome://extensions/shortcuts.`;
+  switch (result.verdict) {
+    case "cmd-not-supported":
+      shortcutTesterResult.textContent =
+        "Cmd isn't used as Backtrack's cross-platform modifier — Ctrl/Alt/Shift map automatically per OS instead.";
+      break;
+    case "needs-modifier":
+      shortcutTesterResult.textContent = "Needs at least one modifier key (Ctrl, Alt, or Shift).";
+      break;
+    case "reserved":
+      shortcutTesterResult.textContent = `⚠️ ${result.combo} is reserved by Chrome — no extension can bind to it.`;
+      break;
+    case "ok":
+      shortcutTesterResult.textContent = `${result.combo} isn't on the known-reserved list — try setting it at chrome://extensions/shortcuts.`;
+      break;
   }
 });
 

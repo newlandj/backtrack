@@ -5,10 +5,14 @@
   "description": "Cycle back through your recently active Chrome tabs with a keyboard shortcut.",
   "scripts": {
     "build": "tsc",
-    "watch": "tsc -w"
+    "postbuild": "cp esm-marker.json dist/package.json",
+    "watch": "tsc -w",
+    "pretest": "npm run build && tsc -p tsconfig.test.json",
+    "test": "node --test dist/*.test.js"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.280",
+    "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
 }

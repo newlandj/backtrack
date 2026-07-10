@@ -1,15 +1,7 @@
-export {};
-
-type ScopeMode = "global" | "perWindow";
-
-interface ScopeState {
-  stack: number[];
-  cursor: number;
-}
+import { type ScopeMode, type ScopeState, getScopeKey, recordActivation, removeTabFromScope, stepScope } from "./mru.js";
 
 const DEFAULT_SCOPE_MODE: ScopeMode = "global";
 const DEFAULT_HUD_ENABLED = true;
-const MAX_STACK_DEPTH = 50;
 const SESSION_STORAGE_KEY = "scopeState";
 const LOCAL_STORAGE_MODE_KEY = "scopeMode";
 const LOCAL_STORAGE_HUD_ENABLED_KEY = "hudEnabled";
@@ -53,10 +45,6 @@ async function persist(): Promise<void> {
   await chrome.storage.session.set({ [SESSION_STORAGE_KEY]: Object.fromEntries(scopes) });
 }
 
-function getScopeKey(windowId: number): string {
-  return scopeMode === "global" ? "global" : String(windowId);
-}
-
 function getOrCreateScope(key: string): ScopeState {
   let scope = scopes.get(key);
   if (!scope) {
@@ -83,25 +71,9 @@ async function ensureScopeSeeded(key: string, windowId: number): Promise<ScopeSt
   return scope;
 }
 
-function recordActivation(tabId: number, windowId: number): void {
-  const scope = getOrCreateScope(getScopeKey(windowId));
-  // Prepending here and discarding stack[0, cursor) mirrors how browser back/forward
-  // history drops the "forward" list once you navigate somewhere new instead of
-  // continuing along the path you'd stepped back from.
-  const tail = scope.stack.slice(scope.cursor).filter((id) => id !== tabId);
-  scope.stack = [tabId, ...tail].slice(0, MAX_STACK_DEPTH);
-  scope.cursor = 0;
-}
-
 function removeTabFromAllScopes(tabId: number): void {
   for (const scope of scopes.values()) {
-    const idx = scope.stack.indexOf(tabId);
-    if (idx === -1) continue;
-    scope.stack.splice(idx, 1);
-    if (idx < scope.cursor) {
-      scope.cursor -= 1;
-    }
-    scope.cursor = Math.min(scope.cursor, Math.max(0, scope.stack.length - 1));
+    removeTabFromScope(scope, tabId);
   }
 }
 
@@ -112,37 +84,6 @@ async function tabStillExists(tabId: number): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-// Walks `delta` (always ±1) steps from the current cursor, wrapping around either end
-// of the stack rather than stopping — reaching the oldest entry and pressing back again
-// lands back on the most recent, and vice versa. Skips over (and eventually prunes) any
-// stale tab IDs it encounters along the way. Returns the first live tab found, or null
-// only if every tab in the stack is gone (a pathological case — onRemoved should
-// already have pruned closed tabs as they closed).
-async function stepScope(scope: ScopeState, delta: number): Promise<number | null> {
-  const total = scope.stack.length;
-  if (total === 0) return null;
-
-  const staleIds = new Set<number>();
-  let idx = (((scope.cursor + delta) % total) + total) % total;
-
-  for (let attempts = 0; attempts < total; attempts++) {
-    const candidateId = scope.stack[idx];
-    if (await tabStillExists(candidateId)) {
-      if (staleIds.size > 0) {
-        scope.stack = scope.stack.filter((id) => !staleIds.has(id));
-      }
-      scope.cursor = scope.stack.indexOf(candidateId);
-      return candidateId;
-    }
-    staleIds.add(candidateId);
-    idx = ((idx + delta) % total + total) % total;
-  }
-
-  scope.stack = scope.stack.filter((id) => !staleIds.has(id));
-  scope.cursor = Math.max(0, Math.min(scope.cursor, scope.stack.length - 1));
-  return null;
 }
 
 async function resolveOperatingWindowId(tab?: chrome.tabs.Tab): Promise<number | null> {
@@ -236,8 +177,8 @@ async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> 
   const windowId = await resolveOperatingWindowId(tab);
   if (windowId === null) return;
 
-  const scope = await ensureScopeSeeded(getScopeKey(windowId), windowId);
-  const targetTabId = await stepScope(scope, delta);
+  const scope = await ensureScopeSeeded(getScopeKey(scopeMode, windowId), windowId);
+  const targetTabId = await stepScope(scope, delta, tabStillExists);
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
@@ -283,7 +224,8 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
       pendingProgrammaticActivation = null;
       return;
     }
-    recordActivation(activeInfo.tabId, activeInfo.windowId);
+    const scope = getOrCreateScope(getScopeKey(scopeMode, activeInfo.windowId));
+    recordActivation(scope, activeInfo.tabId);
     await persist();
   })();
 });

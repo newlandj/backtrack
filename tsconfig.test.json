@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/mru.test.ts", "src/shortcutMatch.test.ts"],
+  "exclude": []
+}
