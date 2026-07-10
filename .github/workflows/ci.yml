@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Validate manifest.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            const required = ['manifest_version', 'name', 'version', 'background', 'commands'];
+            for (const key of required) {
+              if (!(key in manifest)) throw new Error('manifest.json missing required key: ' + key);
+            }
+            if (manifest.manifest_version !== 3) throw new Error('manifest_version must be 3');
+            console.log('manifest.json OK');
+          "
