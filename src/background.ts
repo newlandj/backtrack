@@ -9,10 +9,12 @@ const SESSION_STORAGE_KEY = "scopeState";
 const LOCAL_STORAGE_MODE_KEY = "scopeMode";
 const LOCAL_STORAGE_PREVIOUS_COUNT_KEY = "previousTabCount";
 
-// How long the cycling session stays open after the last press before it's treated as
-// "released" and commits. chrome.commands only fires on keydown — there's no way to
-// observe the actual key release — so this timeout is the only available signal.
-const CYCLE_COMMIT_DELAY_MS = 2000;
+// chrome.commands only fires on keydown, so keyRelease.ts (injected into the tab we just
+// jumped to) is what actually detects the modifier being released and reports back
+// near-instantly. This is the fallback for when that can't happen at all — restricted
+// pages we can't inject into (chrome://, the Web Store), or the report simply never
+// arriving — so a cycling session doesn't hang open forever.
+const CYCLE_FALLBACK_COMMIT_MS = 2000;
 
 let scopeMode: ScopeMode = DEFAULT_SCOPE_MODE;
 let previousTabCount: number = DEFAULT_PREVIOUS_COUNT;
@@ -138,11 +140,19 @@ async function resolveOperatingWindowId(tab?: chrome.tabs.Tab): Promise<number |
 const cycleSession: CycleSessionState = createCycleSessionState();
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Which tab (and scope) a pending commit belongs to. keyRelease.ts's report arrives
+// asynchronously and by tab — a stale report from a tab the session has already cycled
+// past (e.g. its blur firing after we've already jumped on to the next tab) must not be
+// allowed to commit a session that's since moved on. Only a report from the tab that
+// currently owns the pending commit is honored.
+let pendingCommit: { tabId: number; scope: ScopeState } | null = null;
+
 function cancelPendingCommit(): void {
   if (commitTimer !== null) {
     clearTimeout(commitTimer);
     commitTimer = null;
   }
+  pendingCommit = null;
 }
 
 function abortCycleSession(): void {
@@ -180,6 +190,19 @@ async function jumpToTab(tabId: number): Promise<void> {
   }
 }
 
+// Injects the (invisible, non-visual) modifier-keyup listener into the tab we just
+// landed on, so releasing the shortcut's modifier key commits the session immediately
+// instead of waiting on CYCLE_FALLBACK_COMMIT_MS. Best-effort: restricted pages
+// (chrome://, the Chrome Web Store, etc.) reject injection entirely, which is fine —
+// the fallback timer covers it, just less snappily.
+async function armKeyReleaseListener(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["dist/keyRelease.js"] });
+  } catch (err) {
+    console.debug("Backtrack: key-release listener injection skipped for tab", tabId, err);
+  }
+}
+
 async function cycleBack(tab?: chrome.tabs.Tab): Promise<void> {
   const windowId = await resolveOperatingWindowId(tab);
   if (windowId === null) return;
@@ -195,10 +218,12 @@ async function cycleBack(tab?: chrome.tabs.Tab): Promise<void> {
   await jumpToTab(targetTabId);
 
   cancelPendingCommit();
+  pendingCommit = { tabId: targetTabId, scope };
   commitTimer = setTimeout(() => {
     void commitCycleSession(scope);
-  }, CYCLE_COMMIT_DELAY_MS);
+  }, CYCLE_FALLBACK_COMMIT_MS);
 
+  await armKeyReleaseListener(targetTabId);
   await persist();
 }
 
@@ -312,4 +337,14 @@ chrome.commands.onCommand.addListener((command, tab) => {
       await cycleBack(tab);
     }
   })();
+});
+
+// keyRelease.ts reports whenever it sees the modifier lift (or the page/window lose
+// focus) on whichever tab it's running in. Only honored if that tab is the one the
+// pending commit actually belongs to — see the pendingCommit comment above.
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+  if ((message as { type?: string })?.type !== "backtrack-key-released") return;
+  const tabId = sender.tab?.id;
+  if (tabId === undefined || pendingCommit === null || tabId !== pendingCommit.tabId) return;
+  void commitCycleSession(pendingCommit.scope);
 });

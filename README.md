@@ -2,7 +2,7 @@
 
 A minimal Chrome extension that lets you cycle back through your recently active tabs with a single keyboard shortcut. No search popup, no thumbnail grid, no tab management features — just a real MRU (most-recently-used) history you can step through.
 
-It's built on Chrome's [`chrome.commands`](https://developer.chrome.com/docs/extensions/reference/api/commands) API rather than a content script, which means it works everywhere — `chrome://` pages, the omnibox, DevTools-focused windows, PDF viewer tabs — places most tab-switcher extensions simply can't reach.
+It's built on Chrome's [`chrome.commands`](https://developer.chrome.com/docs/extensions/reference/api/commands) API, which means the actual tab-jumping works everywhere — `chrome://` pages, the omnibox, DevTools-focused windows, PDF viewer tabs — places most tab-switcher extensions simply can't reach. A small content script is injected only to detect when you release the shortcut's modifier key; where that injection isn't allowed, cycling still works, it just settles on a short timeout instead of instantly (see "How cycling works" below).
 
 ## Features
 
@@ -41,12 +41,14 @@ Rebind it at `chrome://extensions/shortcuts` — Chrome only allows rebinding a 
 
 ## How cycling works
 
-Each press steps one tab further back through your recent history, wrapping around to the tab you started on after the configured number of presses. Because `chrome.commands` only fires on keydown — there's no way to detect the actual key release — Backtrack treats about two seconds of no further presses as "you let go," and locks in wherever you landed:
+Each press steps one tab further back through your recent history, wrapping around to the tab you started on after the configured number of presses. Releasing the modifier key locks in wherever you landed:
 
 - The tab you land on becomes the new "most recent" tab.
 - The tab you started the gesture on becomes the new "most recent previous" tab.
 
 That means pressing the shortcut again right after a cycling session immediately toggles you back to the tab you started from — the same feel as a quick Alt-Tab-and-release.
+
+`chrome.commands` itself only fires on keydown, so release detection happens via a tiny, invisible listener injected into the tab you land on — it watches for the modifier's keyup (or the window losing focus) and reports back the instant it happens, no visual involved. That injection can fail on pages Chrome doesn't allow extensions into (`chrome://` pages, the Web Store, etc.), so there's a ~2s no-more-presses fallback that commits the session anyway if no release report ever arrives — cycling still works on those pages, it just settles a couple seconds after your last press instead of instantly.
 
 ## Options
 
@@ -58,7 +60,8 @@ Open the extension's **Details → Extension options** from `chrome://extensions
 
 ## Permissions
 
-- `storage` — for the MRU stack and your options. That's the only permission Backtrack needs.
+- `storage` — for the MRU stack and your options.
+- `scripting` + `host_permissions: ["<all_urls>"]` — needed to inject the invisible key-release listener into the tab you just jumped to (it's not the tab your keypress originated on, so `activeTab` doesn't cover it). It doesn't render anything or read page content; it only listens for a modifier keyup/window blur and reports that back.
 
 ## Development
 
@@ -76,9 +79,10 @@ npm test
 
 Runs on [Node's built-in test runner](https://nodejs.org/api/test.html) — no test framework dependency. Coverage is intentionally narrow: it's the pure, dependency-free logic factored out of the trickiest parts of the codebase — `src/mru.ts` (the MRU stack), `src/cycle.ts` (the state machine deciding which tab a cycling session lands on and what it commits when it ends), and `src/shortcutMatch.ts` (the options page's reserved-shortcut checker). All three are plain functions/objects with no `chrome.*` or DOM calls, imported by `background.ts`/`options.ts` and exercised directly under Node. When a bug like this turns up, extracting the relevant piece into one of these files (or a new one) and writing a regression test for it first is the expected move, not an afterthought.
 
-What's *not* covered, and has to stay a manual check, is everything that actually talks to Chrome — `background.ts`'s event listeners and `chrome.storage`/`chrome.tabs` calls. Worth walking through by hand after a nontrivial change:
+What's *not* covered, and has to stay a manual check, is everything that actually talks to Chrome — `background.ts`'s event listeners, `chrome.storage`/`chrome.tabs`/`chrome.scripting` calls, and `keyRelease.ts`'s keyup/blur listening. Worth walking through by hand after a nontrivial change:
 
-- Normal http(s) tabs, `chrome://` internal pages, and a PDF viewer tab (cycling should work identically on all).
+- A quick tap-and-release should feel instant; holding the modifier and tapping the shortcut repeatedly should keep stepping back until you let go.
+- Normal http(s) tabs, `chrome://` internal pages, and a PDF viewer tab (cycling should work on all three; release detection is instant only on the first — the others fall back to the ~2s timeout).
 - A DevTools-focused window, and multiple browser windows open at once (try both the global and per-window options).
 - Incognito, if you've enabled "Allow in Incognito" for the extension.
 - Closing a tab that's mid-cycle, then continuing to cycle — it should skip the closed tab cleanly.
@@ -92,7 +96,7 @@ What's *not* covered, and has to stay a manual check, is everything that actuall
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase: `src/mru.ts`, `src/cycle.ts`, and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack and cycling session up to Chrome's APIs, and `src/options.ts` does the same for the options page. The trickier design decisions (the activation-guard flag, the frozen cycling window, the timeout standing in for key-release) are explained in comments at the point they matter — start there.
+Issues and PRs welcome. It's a small codebase: `src/mru.ts`, `src/cycle.ts`, and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack and cycling session up to Chrome's APIs, `src/options.ts` does the same for the options page, and `src/keyRelease.ts` is the invisible content script that detects the modifier key being released. The trickier design decisions (the activation-guard flag, the frozen cycling window, the pendingCommit tab-ownership check, the timeout fallback) are explained in comments at the point they matter — start there.
 
 All changes to `main` go through a pull request, and CI (`npm test` + a manifest sanity check) must pass before merging.
 
