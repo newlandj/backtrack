@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Backtrack",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Cycle back through your recently active tabs with a keyboard shortcut — works even on chrome:// pages, devtools, and the omnibox.",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -16,11 +16,11 @@
   "commands": {
     "go-back": {
       "suggested_key": { "default": "Alt+Left" },
-      "description": "Jump to previous tab"
+      "description": "Cycle back through recent tabs"
     },
     "go-forward": {
       "suggested_key": { "default": "Alt+Right" },
-      "description": "Jump to next tab in history"
+      "description": "Cycle forward through recent tabs"
     }
   }
 }

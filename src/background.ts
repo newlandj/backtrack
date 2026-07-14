@@ -1,21 +1,29 @@
-import { type ScopeMode, type ScopeState, getScopeKey, recordActivation, removeTabFromScope, stepScope } from "./mru.js";
-import { type HudSessionState, createHudSessionState, beginHudSession, attemptCommit } from "./hudSession.js";
+import { type ScopeMode, type ScopeState, getScopeKey, recordActivation, removeTabFromScope } from "./mru.js";
+import { type CycleSessionState, createCycleSessionState, stepCycleSession, endCycleSession, resetCycleSession } from "./cycle.js";
 
 const DEFAULT_SCOPE_MODE: ScopeMode = "global";
-const DEFAULT_HUD_ENABLED = true;
+const DEFAULT_PREVIOUS_COUNT = 2;
+const MIN_PREVIOUS_COUNT = 1;
+const MAX_PREVIOUS_COUNT = 10;
 const SESSION_STORAGE_KEY = "scopeState";
 const LOCAL_STORAGE_MODE_KEY = "scopeMode";
-const LOCAL_STORAGE_HUD_ENABLED_KEY = "hudEnabled";
+const LOCAL_STORAGE_PREVIOUS_COUNT_KEY = "previousTabCount";
+
+// chrome.commands only fires on keydown, so keyRelease.ts (injected into the tab we just
+// jumped to) is what actually detects the modifier being released and reports back
+// near-instantly. This is the fallback for when that can't happen at all — restricted
+// pages we can't inject into (chrome://, the Web Store), or the report simply never
+// arriving — so a cycling session doesn't hang open forever.
+const CYCLE_FALLBACK_COMMIT_MS = 2000;
 
 let scopeMode: ScopeMode = DEFAULT_SCOPE_MODE;
-let hudEnabled: boolean = DEFAULT_HUD_ENABLED;
+let previousTabCount: number = DEFAULT_PREVIOUS_COUNT;
 let scopes: Map<string, ScopeState> = new Map();
 let lastFocusedNormalWindowId: number | null = null;
 
 // A jump we trigger ourselves (chrome.tabs.update) re-fires onActivated. Without this
-// guard, that re-fire would re-promote the jump target to the front of the stack and
-// wipe out the cursor position, making repeated back-presses oscillate between the two
-// most recent tabs instead of walking deeper into history.
+// guard, that re-fire would treat our own programmatic jump as a genuine tab switch and
+// prematurely record it into the MRU stack / cancel the in-progress cycling session.
 let pendingProgrammaticActivation: number | null = null;
 
 let loadPromise: Promise<void> | null = null;
@@ -23,10 +31,16 @@ function ensureLoaded(): Promise<void> {
   return (loadPromise ??= loadState());
 }
 
+function clampPreviousCount(value: unknown): number {
+  const n = Math.trunc(typeof value === "number" ? value : DEFAULT_PREVIOUS_COUNT);
+  if (!Number.isFinite(n)) return DEFAULT_PREVIOUS_COUNT;
+  return Math.min(MAX_PREVIOUS_COUNT, Math.max(MIN_PREVIOUS_COUNT, n));
+}
+
 async function loadState(): Promise<void> {
-  const local = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_HUD_ENABLED_KEY]);
+  const local = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_PREVIOUS_COUNT_KEY]);
   scopeMode = (local[LOCAL_STORAGE_MODE_KEY] as ScopeMode | undefined) ?? DEFAULT_SCOPE_MODE;
-  hudEnabled = (local[LOCAL_STORAGE_HUD_ENABLED_KEY] as boolean | undefined) ?? DEFAULT_HUD_ENABLED;
+  previousTabCount = clampPreviousCount(local[LOCAL_STORAGE_PREVIOUS_COUNT_KEY]);
 
   const session = await chrome.storage.session.get(SESSION_STORAGE_KEY);
   const raw = session[SESSION_STORAGE_KEY] as Record<string, ScopeState> | undefined;
@@ -49,7 +63,7 @@ async function persist(): Promise<void> {
 function getOrCreateScope(key: string): ScopeState {
   let scope = scopes.get(key);
   if (!scope) {
-    scope = { stack: [], cursor: 0 };
+    scope = { stack: [] };
     scopes.set(key, scope);
   }
   return scope;
@@ -66,7 +80,6 @@ async function ensureScopeSeeded(key: string, windowId: number): Promise<ScopeSt
     const activeTabId = await getActiveTabId(windowId);
     if (activeTabId !== null) {
       scope.stack = [activeTabId];
-      scope.cursor = 0;
     }
   }
   return scope;
@@ -85,6 +98,16 @@ async function tabStillExists(tabId: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Filters a scope's stack down to tabs that still exist, pruning any stale ids found
+// along the way — a tab can close without the onRemoved listener having run yet if the
+// service worker was asleep at the time.
+async function liveTabIds(scope: ScopeState): Promise<number[]> {
+  const results = await Promise.all(scope.stack.map(async (id) => ((await tabStillExists(id)) ? id : null)));
+  const live = results.filter((id): id is number => id !== null);
+  if (live.length !== scope.stack.length) scope.stack = live;
+  return live;
 }
 
 async function resolveOperatingWindowId(tab?: chrome.tabs.Tab): Promise<number | null> {
@@ -112,92 +135,46 @@ async function resolveOperatingWindowId(tab?: chrome.tabs.Tab): Promise<number |
   return normalWindows[0]?.id ?? null;
 }
 
-interface HudItem {
-  id: number;
-  title: string;
-  favIconUrl: string;
-  isCurrent: boolean;
-}
-
-const HUD_WINDOW_RADIUS = 2;
-
-// How long a cycling session stays "open" if the user doesn't press again, and how long
-// the HUD stays up. Single source of truth — passed to hud.ts in every message rather
-// than also living as a constant over there, so there's exactly one place that decides
-// timing, not two that have to agree.
-const HUD_HOLD_MS = 3000;
-
-// Tracks which tab currently "owns" the active cycling session — see hudSession.ts for
-// the (independently unit-tested) decision logic. In-memory only.
-const hudSession: HudSessionState = createHudSessionState();
+// Tracks the in-progress cycling gesture — see cycle.ts for the (independently
+// unit-tested) decision logic. In-memory only.
+const cycleSession: CycleSessionState = createCycleSessionState();
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Which tab (and scope) a pending commit belongs to. keyRelease.ts's report arrives
+// asynchronously and by tab — a stale report from a tab the session has already cycled
+// past (e.g. its blur firing after we've already jumped on to the next tab) must not be
+// allowed to commit a session that's since moved on. Only a report from the tab that
+// currently owns the pending commit is honored.
+let pendingCommit: { tabId: number; scope: ScopeState } | null = null;
 
 function cancelPendingCommit(): void {
   if (commitTimer !== null) {
     clearTimeout(commitTimer);
     commitTimer = null;
   }
+  pendingCommit = null;
 }
 
-// A cycling session (however many steps) is a single logical navigation, not a series
-// of independent ones — like walking back through browser page history and then
-// clicking a link, only the final landing spot should become the new "most recent",
-// with the tabs stepped past along the way dropped from the forward direction. Without
-// this, releasing the modifier and pressing again continues walking deeper from the old
-// cursor instead of taking one step from the tab the user actually just committed to.
-// This does the exact same stack mutation a genuine (non-programmatic) tab activation
-// already triggers via recordActivation in the onActivated listener below — committing
-// a cycling session is, after the fact, indistinguishable from a normal deliberate
-// tab switch to that tab.
-async function commitCyclingSession(tabId: number, windowId: number): Promise<void> {
+function abortCycleSession(): void {
   cancelPendingCommit();
-  if (!attemptCommit(hudSession, tabId)) return; // stale — session has already moved on
-  await ensureLoaded();
-  const scope = getOrCreateScope(getScopeKey(scopeMode, windowId));
-  recordActivation(scope, tabId);
-  await persist();
+  resetCycleSession(cycleSession);
 }
 
-// chrome.commands only fires on keydown (no keyup signal), so a true hold-to-preview
-// carousel isn't possible here — instead the HUD flashes briefly after each press and
-// fades, giving a lightweight sense of where you are in the stack without that gesture.
-async function showHud(scope: ScopeState, currentTabId: number, instant: boolean): Promise<void> {
-  const start = Math.max(0, scope.cursor - HUD_WINDOW_RADIUS);
-  const end = Math.min(scope.stack.length - 1, scope.cursor + HUD_WINDOW_RADIUS);
-  const ids = scope.stack.slice(start, end + 1);
-  const tabs = await Promise.all(ids.map((id) => chrome.tabs.get(id).catch(() => null)));
-
-  const items: HudItem[] = [];
-  for (let i = 0; i < ids.length; i++) {
-    const tab = tabs[i];
-    if (!tab) continue;
-    items.push({
-      id: ids[i],
-      title: tab.title ?? "",
-      favIconUrl: tab.favIconUrl ?? "",
-      isCurrent: ids[i] === currentTabId,
-    });
+// A cycling session (however many taps) is a single logical navigation, not a series of
+// independent ones: only the tab landed on becomes the new "most recent", and the tab
+// you started the gesture on becomes the new "most recent previous" — so tapping the
+// shortcut again right after immediately toggles back to where you were, the same way a
+// quick Alt-Tab-and-release does. Landing back on the origin tab itself (a full
+// wraparound) is a no-op, since recordActivation on a tab already at the front of the
+// stack changes nothing.
+async function commitCycleSession(scope: ScopeState): Promise<void> {
+  cancelPendingCommit();
+  const commit = endCycleSession(cycleSession);
+  if (!commit) return;
+  if (commit.landedTabId !== commit.originTabId) {
+    recordActivation(scope, commit.landedTabId);
   }
-  if (items.length === 0) return;
-
-  try {
-    await chrome.scripting.executeScript({ target: { tabId: currentTabId }, files: ["dist/hud.js"] });
-    await chrome.tabs.sendMessage(currentTabId, {
-      type: "backtrack-hud-show",
-      items,
-      position: scope.cursor + 1,
-      total: scope.stack.length,
-      holdMs: HUD_HOLD_MS,
-      instant,
-    });
-  } catch (err) {
-    // Expected on restricted pages (chrome://, Chrome Web Store, etc.) — the HUD just
-    // can't render there. Logged (not swallowed silently) so real bugs — a missing
-    // dist/hud.js build, a permissions issue — are visible in the service worker
-    // console instead of failing invisibly. The tab jump itself already succeeded via
-    // chrome.tabs.update, which is the part that actually matters.
-    console.debug("Backtrack: HUD injection skipped for tab", currentTabId, err);
-  }
+  await persist();
 }
 
 async function jumpToTab(tabId: number): Promise<void> {
@@ -213,31 +190,43 @@ async function jumpToTab(tabId: number): Promise<void> {
   }
 }
 
-async function goDirection(delta: number, tab?: chrome.tabs.Tab): Promise<void> {
+// Injects the (invisible, non-visual) modifier-keyup listener into the tab we just
+// landed on, so releasing the shortcut's modifier key commits the session immediately
+// instead of waiting on CYCLE_FALLBACK_COMMIT_MS. Best-effort: restricted pages
+// (chrome://, the Chrome Web Store, etc.) reject injection entirely, which is fine —
+// the fallback timer covers it, just less snappily.
+async function armKeyReleaseListener(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["dist/keyRelease.js"] });
+  } catch (err) {
+    console.debug("Backtrack: key-release listener injection skipped for tab", tabId, err);
+  }
+}
+
+// delta is +1 for "back" (step towards older tabs) or -1 for "forward" (step towards
+// newer tabs, undoing an overshoot) — both commands drive the same cycling session, just
+// walking it in opposite directions.
+async function cycleStep(delta: 1 | -1, tab?: chrome.tabs.Tab): Promise<void> {
   const windowId = await resolveOperatingWindowId(tab);
   if (windowId === null) return;
 
   const scope = await ensureScopeSeeded(getScopeKey(scopeMode, windowId), windowId);
-  const targetTabId = await stepScope(scope, delta, tabStillExists);
+  const currentTabId = await getActiveTabId(windowId);
+  if (currentTabId === null) return;
+
+  const recent = await liveTabIds(scope);
+  const targetTabId = stepCycleSession(cycleSession, currentTabId, recent, previousTabCount, delta);
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
 
-  const instant = beginHudSession(hudSession, targetTabId);
-
-  // The previous tab's own pending commit (if any) is superseded now that we've moved
-  // on — this new tab owns the session instead. Schedule its own fallback commit: if
-  // nothing commits sooner (an explicit key-release report from hud.ts), this fires
-  // after HUD_HOLD_MS of no further presses. Runs regardless of whether the HUD is
-  // actually shown, since a hud.ts key-release report is only possible when its content
-  // script is running — with the HUD disabled there's no other way to detect "the user
-  // stopped cycling" at all.
   cancelPendingCommit();
+  pendingCommit = { tabId: targetTabId, scope };
   commitTimer = setTimeout(() => {
-    void commitCyclingSession(targetTabId, windowId);
-  }, HUD_HOLD_MS);
+    void commitCycleSession(scope);
+  }, CYCLE_FALLBACK_COMMIT_MS);
 
-  if (hudEnabled) await showHud(scope, targetTabId, instant);
+  await armKeyReleaseListener(targetTabId);
   await persist();
 }
 
@@ -249,7 +238,7 @@ async function resetAndReseedAllScopes(): Promise<void> {
     const win = windows.find((w) => w.focused) ?? windows[0];
     const activeTab = win?.tabs?.find((t) => t.active);
     if (activeTab?.id !== undefined) {
-      scopes.set("global", { stack: [activeTab.id], cursor: 0 });
+      scopes.set("global", { stack: [activeTab.id] });
     }
     return;
   }
@@ -258,16 +247,16 @@ async function resetAndReseedAllScopes(): Promise<void> {
     if (win.id === undefined) continue;
     const activeTab = win.tabs?.find((t) => t.active);
     if (activeTab?.id === undefined) continue;
-    scopes.set(String(win.id), { stack: [activeTab.id], cursor: 0 });
+    scopes.set(String(win.id), { stack: [activeTab.id] });
   }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
-    const stored = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_HUD_ENABLED_KEY]);
+    const stored = await chrome.storage.local.get([LOCAL_STORAGE_MODE_KEY, LOCAL_STORAGE_PREVIOUS_COUNT_KEY]);
     const defaults: Record<string, unknown> = {};
     if (!stored[LOCAL_STORAGE_MODE_KEY]) defaults[LOCAL_STORAGE_MODE_KEY] = DEFAULT_SCOPE_MODE;
-    if (stored[LOCAL_STORAGE_HUD_ENABLED_KEY] === undefined) defaults[LOCAL_STORAGE_HUD_ENABLED_KEY] = DEFAULT_HUD_ENABLED;
+    if (stored[LOCAL_STORAGE_PREVIOUS_COUNT_KEY] === undefined) defaults[LOCAL_STORAGE_PREVIOUS_COUNT_KEY] = DEFAULT_PREVIOUS_COUNT;
     if (Object.keys(defaults).length > 0) await chrome.storage.local.set(defaults);
   })();
 });
@@ -279,6 +268,11 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
       pendingProgrammaticActivation = null;
       return;
     }
+    // A genuine (non-programmatic) tab switch — e.g. the user clicked another tab
+    // directly — supersedes any cycling gesture in progress; committing it later on
+    // the old timer would incorrectly re-promote a tab the user has already moved on
+    // from.
+    if (cycleSession.originTabId !== null) abortCycleSession();
     const scope = getOrCreateScope(getScopeKey(scopeMode, activeInfo.windowId));
     recordActivation(scope, activeInfo.tabId);
     await persist();
@@ -289,6 +283,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void (async () => {
     await ensureLoaded();
     removeTabFromAllScopes(tabId);
+    if (cycleSession.window.includes(tabId)) abortCycleSession();
     await persist();
   })();
 });
@@ -323,14 +318,15 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
 
-  if (changes[LOCAL_STORAGE_HUD_ENABLED_KEY]) {
-    hudEnabled = (changes[LOCAL_STORAGE_HUD_ENABLED_KEY].newValue as boolean | undefined) ?? DEFAULT_HUD_ENABLED;
+  if (changes[LOCAL_STORAGE_PREVIOUS_COUNT_KEY]) {
+    previousTabCount = clampPreviousCount(changes[LOCAL_STORAGE_PREVIOUS_COUNT_KEY].newValue);
   }
 
   if (changes[LOCAL_STORAGE_MODE_KEY]) {
     void (async () => {
       await ensureLoaded();
       scopeMode = (changes[LOCAL_STORAGE_MODE_KEY].newValue as ScopeMode) ?? DEFAULT_SCOPE_MODE;
+      abortCycleSession();
       await resetAndReseedAllScopes();
       await persist();
     })();
@@ -341,26 +337,19 @@ chrome.commands.onCommand.addListener((command, tab) => {
   void (async () => {
     await ensureLoaded();
     if (command === "go-back") {
-      await goDirection(1, tab);
+      await cycleStep(1, tab);
     } else if (command === "go-forward") {
-      await goDirection(-1, tab);
+      await cycleStep(-1, tab);
     }
   })();
 });
 
-// hud.ts reports back whenever it actually dismisses — keyup, blur, or its own local
-// hold timer (kept local so the visual reliably disappears even if this message never
-// arrives). commitCyclingSession rejects it via attemptCommit if the reporting tab is no
-// longer the one that owns the session — each tab's content script instance is
-// independent, so if the user has already cycled on to a newer tab, an old tab's report
-// must not commit a tab that's no longer current. This is what makes release-to-commit
-// near-instant when the HUD is on. commitTimer above is the fallback for when it's off —
-// with no content script running there's no way to detect a key release at all, so a
-// plain elapsed-time commit is the best available signal for "the user stopped cycling."
+// keyRelease.ts reports whenever it sees the modifier lift (or the page/window lose
+// focus) on whichever tab it's running in. Only honored if that tab is the one the
+// pending commit actually belongs to — see the pendingCommit comment above.
 chrome.runtime.onMessage.addListener((message: unknown, sender) => {
-  if ((message as { type?: string })?.type !== "backtrack-hud-dismissed") return;
+  if ((message as { type?: string })?.type !== "backtrack-key-released") return;
   const tabId = sender.tab?.id;
-  const windowId = sender.tab?.windowId;
-  if (tabId === undefined || windowId === undefined) return;
-  void commitCyclingSession(tabId, windowId);
+  if (tabId === undefined || pendingCommit === null || tabId !== pendingCommit.tabId) return;
+  void commitCycleSession(pendingCommit.scope);
 });

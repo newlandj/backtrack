@@ -19,6 +19,20 @@
       input[type="checkbox"] {
         margin-top: 3px;
       }
+      .number-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: default;
+      }
+      .number-row input[type="number"] {
+        width: 48px;
+        font: 13px ui-monospace, Menlo, monospace;
+        padding: 4px 6px;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 0, 0, 0.15);
+        text-align: center;
+      }
       p.hint {
         color: #666;
         margin: 8px 0 0 24px;
@@ -101,27 +115,30 @@
       <span>Cycle tabs across all windows (global history)</span>
     </label>
     <p class="hint">
-      When unchecked, each window keeps its own separate back/forward history instead.
-      Switching this setting resets your current back/forward history.
+      When unchecked, each window keeps its own separate history instead. Switching this
+      setting resets your current history.
     </p>
 
     <hr />
 
-    <label>
-      <input type="checkbox" id="hud-enabled-checkbox" />
-      <span>Show visual tab carousel while cycling</span>
+    <label class="number-row">
+      <span>Cycle through</span>
+      <input type="number" id="previous-count-input" min="1" max="10" step="1" />
+      <span>previous tab(s)</span>
     </label>
     <p class="hint">
-      A small carousel of cards that will show the title of the tab you have landed on,
-      how many tabs are stored, and what tab number you're on. This may be useful if you
-      have many tabs open and cannot see the tab names in the browser.
+      Keep pressing a shortcut to step further in that direction, wrapping around to the
+      tab you started on. The other shortcut steps back the other way through the same
+      tabs, so you can correct an overshoot without starting over. Pausing for a couple
+      of seconds locks in wherever you land — pressing "cycle back" again then takes you
+      right back to the tab you started from.
     </p>
 
     <hr />
 
     <h2>Keyboard shortcuts</h2>
-    <div class="shortcut-row"><span>Go back</span> <code id="go-back-shortcut">…</code></div>
-    <div class="shortcut-row"><span>Go forward</span> <code id="go-forward-shortcut">…</code></div>
+    <div class="shortcut-row"><span>Cycle back</span> <code id="go-back-shortcut">…</code></div>
+    <div class="shortcut-row"><span>Cycle forward</span> <code id="go-forward-shortcut">…</code></div>
     <p class="hint" style="margin-left: 0">
       Chrome only lets shortcuts be rebound from its own settings page, not from here.
     </p>
