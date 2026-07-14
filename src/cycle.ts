@@ -11,21 +11,25 @@ export function createCycleSessionState(): CycleSessionState {
   return { originTabId: null, window: [], index: 0 };
 }
 
-// Call on every press of the shortcut. `recentTabIds` is the scope's live MRU stack,
+// Call on every press of either shortcut. `recentTabIds` is the scope's live MRU stack,
 // most-recent-first. `previousCount` caps how many tabs back the cycle reaches, not
-// counting currentTabId itself.
+// counting currentTabId itself. `delta` is +1 for "back" (step towards older tabs) or
+// -1 for "forward" (step towards newer tabs, undoing an overshoot) — both directions
+// walk the same window, just opposite ways around it.
 //
-// The first press of a fresh session builds a fixed window — [currentTabId, ...up to
-// previousCount older tabs] — and freezes it for the rest of the session, so a tab
-// activated elsewhere mid-session (which would otherwise shuffle recentTabIds) can't
-// change which tab a given press lands on. Returns the tab to jump to, or null if
-// there's nowhere to go (no other live tabs in scope) — in that case no session is
-// started at all.
+// The first press of a fresh session (in either direction) builds a fixed window —
+// [currentTabId, ...up to previousCount older tabs] — and freezes it for the rest of
+// the session, so a tab activated elsewhere mid-session (which would otherwise shuffle
+// recentTabIds) can't change which tab a given press lands on, and so switching
+// direction mid-session walks the same set of tabs rather than building a new one.
+// Returns the tab to jump to, or null if there's nowhere to go (no other live tabs in
+// scope) — in that case no session is started at all.
 export function stepCycleSession(
   state: CycleSessionState,
   currentTabId: number,
   recentTabIds: number[],
   previousCount: number,
+  delta: 1 | -1,
 ): number | null {
   if (state.originTabId === null) {
     const previous = recentTabIds.filter((id) => id !== currentTabId).slice(0, Math.max(1, previousCount));
@@ -34,7 +38,8 @@ export function stepCycleSession(
     state.originTabId = currentTabId;
     state.index = 0;
   }
-  state.index = (state.index + 1) % state.window.length;
+  const len = state.window.length;
+  state.index = ((state.index + delta) % len + len) % len;
   return state.window[state.index];
 }
 

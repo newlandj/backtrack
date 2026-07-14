@@ -203,7 +203,10 @@ async function armKeyReleaseListener(tabId: number): Promise<void> {
   }
 }
 
-async function cycleBack(tab?: chrome.tabs.Tab): Promise<void> {
+// delta is +1 for "back" (step towards older tabs) or -1 for "forward" (step towards
+// newer tabs, undoing an overshoot) — both commands drive the same cycling session, just
+// walking it in opposite directions.
+async function cycleStep(delta: 1 | -1, tab?: chrome.tabs.Tab): Promise<void> {
   const windowId = await resolveOperatingWindowId(tab);
   if (windowId === null) return;
 
@@ -212,7 +215,7 @@ async function cycleBack(tab?: chrome.tabs.Tab): Promise<void> {
   if (currentTabId === null) return;
 
   const recent = await liveTabIds(scope);
-  const targetTabId = stepCycleSession(cycleSession, currentTabId, recent, previousTabCount);
+  const targetTabId = stepCycleSession(cycleSession, currentTabId, recent, previousTabCount, delta);
   if (targetTabId === null) return;
 
   await jumpToTab(targetTabId);
@@ -334,7 +337,9 @@ chrome.commands.onCommand.addListener((command, tab) => {
   void (async () => {
     await ensureLoaded();
     if (command === "go-back") {
-      await cycleBack(tab);
+      await cycleStep(1, tab);
+    } else if (command === "go-forward") {
+      await cycleStep(-1, tab);
     }
   })();
 });

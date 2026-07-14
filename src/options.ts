@@ -11,6 +11,7 @@ const modeCheckbox = document.getElementById("global-mode-checkbox") as HTMLInpu
 const previousCountInput = document.getElementById("previous-count-input") as HTMLInputElement;
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const goBackShortcutEl = document.getElementById("go-back-shortcut") as HTMLElement;
+const goForwardShortcutEl = document.getElementById("go-forward-shortcut") as HTMLElement;
 const openShortcutsBtn = document.getElementById("open-shortcuts-btn") as HTMLButtonElement;
 const shortcutTester = document.getElementById("shortcut-tester") as HTMLInputElement;
 const shortcutTesterResult = document.getElementById("shortcut-tester-result") as HTMLElement;
@@ -55,11 +56,13 @@ previousCountInput.addEventListener("change", () => {
 // chrome.commands has no "set" API — the only way to actually rebind a shortcut is
 // through Chrome's own chrome://extensions/shortcuts page, which no extension can write
 // to programmatically. This just displays whatever's currently bound (populated with
-// our manifest default on first install) and deep-links to that page to change it.
-async function loadShortcut(): Promise<void> {
+// our manifest defaults on first install) and deep-links to that page to change it.
+async function loadShortcuts(): Promise<void> {
   const commands = await chrome.commands.getAll();
   const goBack = commands.find((c) => c.name === "go-back");
+  const goForward = commands.find((c) => c.name === "go-forward");
   goBackShortcutEl.textContent = goBack?.shortcut || "(not set)";
+  goForwardShortcutEl.textContent = goForward?.shortcut || "(not set)";
 }
 
 openShortcutsBtn.addEventListener("click", () => {
@@ -92,4 +95,4 @@ shortcutTester.addEventListener("keydown", (e) => {
 });
 
 void loadCurrentSettings();
-void loadShortcut();
+void loadShortcuts();

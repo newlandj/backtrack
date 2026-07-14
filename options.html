@@ -122,24 +122,27 @@
     <hr />
 
     <label class="number-row">
-      <span>Cycle back through</span>
+      <span>Cycle through</span>
       <input type="number" id="previous-count-input" min="1" max="10" step="1" />
       <span>previous tab(s)</span>
     </label>
     <p class="hint">
-      Keep pressing the shortcut to step further back, wrapping around to the tab you
-      started on. Pausing for a couple of seconds locks in wherever you land — pressing
-      the shortcut again then takes you right back to the tab you started from.
+      Keep pressing a shortcut to step further in that direction, wrapping around to the
+      tab you started on. The other shortcut steps back the other way through the same
+      tabs, so you can correct an overshoot without starting over. Pausing for a couple
+      of seconds locks in wherever you land — pressing "cycle back" again then takes you
+      right back to the tab you started from.
     </p>
 
     <hr />
 
-    <h2>Keyboard shortcut</h2>
+    <h2>Keyboard shortcuts</h2>
     <div class="shortcut-row"><span>Cycle back</span> <code id="go-back-shortcut">…</code></div>
+    <div class="shortcut-row"><span>Cycle forward</span> <code id="go-forward-shortcut">…</code></div>
     <p class="hint" style="margin-left: 0">
       Chrome only lets shortcuts be rebound from its own settings page, not from here.
     </p>
-    <button type="button" id="open-shortcuts-btn">Change shortcut…</button>
+    <button type="button" id="open-shortcuts-btn">Change shortcuts…</button>
 
     <details>
       <summary>Check a shortcut before you try it</summary>

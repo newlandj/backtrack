@@ -17,6 +17,10 @@
     "go-back": {
       "suggested_key": { "default": "Alt+Left" },
       "description": "Cycle back through recent tabs"
+    },
+    "go-forward": {
+      "suggested_key": { "default": "Alt+Right" },
+      "description": "Cycle forward through recent tabs"
     }
   }
 }
