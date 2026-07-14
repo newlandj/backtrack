@@ -9,7 +9,7 @@ It's built on Chrome's [`chrome.commands`](https://developer.chrome.com/docs/ext
 - **Real N-deep history**, not just a single previous-tab swap. Keep pressing back to walk further into your history; forward retraces your steps.
 - **Works on internal Chrome pages** and anywhere else content scripts can't run.
 - **Global or per-window history**, your choice, via the extension's options page.
-- **Minimal permissions** — only `storage`, nothing that touches tab URLs or content.
+- **A lightweight visual HUD** — a small card naming the tab you landed on, staying up and following along while you keep cycling, and disappearing the instant you release the key.
 - History is kept in `chrome.storage.session`, so it survives the extension's service worker sleeping/restarting, but is cleared when you fully quit Chrome — no stale tab IDs to reconcile after a restart.
 
 ## Install (unpacked, for now)
@@ -33,19 +33,35 @@ Default bindings:
 
 | Command | Default shortcut |
 | --- | --- |
-| Go back | `Alt+Q` |
-| Go forward | `Alt+W` |
+| Go back | `Alt+Left` |
+| Go forward | `Alt+Right` |
 
-Rebind them at `chrome://extensions/shortcuts`. Note: Chrome reserves `Ctrl+Tab` and won't let extensions bind it directly.
+Alt (Option on Mac) + arrow keys is comfortably reachable with one hand and doesn't carry the risk earlier letter-key choices did — there's no `Cmd+Left`/`Cmd+Right` doing anything destructive on Mac (Chrome's own back/forward-in-page-history shortcut is `Cmd+[`/`Cmd+]`, not arrows), unlike the `Alt+Q`-slipping-to-`Cmd+Q`-quits-the-browser risk that ruled out letter keys under `Alt`. Left/right also doubles as a natural back/forward mnemonic.
+
+A hold-and-cycle (however many steps) counts as one navigation, not a series of independent ones — like walking back through a page's browser history and then clicking a link, only the tab you land on becomes the new "most recent"; anything you stepped past along the way is dropped from the forward direction. This "commit" happens the instant you release Alt (near-instant when the HUD is on, since it can watch for the actual key release; falling back to a few seconds after your last press if the HUD is off, since there's otherwise no way to detect a key release at all). Without this, releasing and pressing back again would keep walking deeper into history from wherever the cursor happened to be, instead of taking one step from the tab you're actually looking at.
+
+Rebind them at `chrome://extensions/shortcuts` — Chrome only allows rebinding a command's shortcut from that page; no extension, including this one, can set it programmatically. Backtrack's options page shows your current bindings and links straight there, plus has a checker where you can press a combo to see if it's on Chrome's known-reserved list (`Ctrl+Tab`, `Ctrl+W`, `Ctrl+T`, etc. — things no extension can ever bind to) before you try setting it.
 
 ## Options
 
-Open the extension's **Details → Extension options** from `chrome://extensions` to toggle between:
+Open the extension's **Details → Extension options** from `chrome://extensions` to toggle:
 
-- **Global history** (default) — one shared back/forward history across all your windows.
-- **Per-window history** — each window keeps its own separate history.
+- **Global vs. per-window history** — global (default) is one shared back/forward history across all your windows; per-window gives each window its own separate history. Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
+- **Visual HUD on/off** — see below. Defaults to on.
+- **Keyboard shortcuts** — read-only display of your current bindings, a button to jump to `chrome://extensions/shortcuts`, and the reserved-combo checker described above.
 
-Switching modes resets your current back/forward history (there's no well-defined way to merge a per-window history into a single global one, or vice versa).
+## Visual HUD
+
+Each go-back/go-forward press shows a small glass card near the bottom of the page — the tab's favicon and title, a couple of neighboring-tab dots on either side, and a "position / total" counter. Hold Alt and tap the arrow keys repeatedly to step through your history; the card stays up and follows along the whole time, updating instantly on each new tab rather than replaying its entrance animation — and disappears the instant you release Alt. (`chrome.commands` itself only fires on keydown, so this release-detection happens via a keyup listener in the injected overlay itself, once it's on the page — a quick single tap-and-release still works fine, falling back to a 3s auto-hide if the key gets released before the overlay finishes loading.) It won't appear on `chrome://` pages, the Chrome Web Store, or other pages Chrome doesn't allow extensions to inject into — the tab jump itself still works there, just without the visual.
+
+Landing on each new tab is technically a brand-new page with its own separate overlay — there's no way to keep literally the same DOM element following you across a tab switch — but skipping the entrance animation for anything but the first tab in a cycling session is what makes it read as one continuous HUD rather than repeatedly popping in and out.
+
+Turn it off entirely in the options page for silent, keyboard-only cycling — useful if you want to compare the two side by side.
+
+## Permissions
+
+- `storage` — for the MRU stack and your options.
+- `scripting` + `host_permissions: ["<all_urls>"]` — needed to inject the HUD overlay into the tab you just jumped to (it's not the tab your keypress originated on, so `activeTab` doesn't cover it) and to read that tab's title/favicon for the HUD. Requested at install regardless of the HUD's on/off state below, since it can be toggled back on at any time — but nothing actually uses it while the HUD is off, and cycling itself works identically either way.
 
 ## Development
 
@@ -55,17 +71,32 @@ npm run watch   # recompiles src/*.ts to dist/ on every save
 
 After a rebuild, click the reload icon on Backtrack's card at `chrome://extensions` to pick up the change.
 
-There's no automated test suite — this is a small, five-file extension best verified by hand. See `DEV_PLAN.md` for the manual test matrix (multi-window setups, incognito, DevTools-focused windows, closing a tab mid-history, etc.) used during development.
+### Tests
+
+```sh
+npm test
+```
+
+Runs on [Node's built-in test runner](https://nodejs.org/api/test.html) — no test framework dependency. Coverage is intentionally narrow: it's the pure, dependency-free logic factored out of the trickiest parts of the codebase — `src/mru.ts` (the MRU stack's wraparound/stepping/pruning algorithm), `src/hudSession.ts` (the state machine deciding whether a jump continues an active cycling session or starts a fresh one, and which tab a session commits when it ends), and `src/shortcutMatch.ts` (the options page's reserved-shortcut checker). All three are plain functions/objects with no `chrome.*` or DOM calls, imported by `background.ts`/`options.ts` and exercised directly under Node. When a bug like this turns up, extracting the relevant piece into one of these files (or a new one) and writing a regression test for it first is the expected move, not an afterthought.
+
+What's *not* covered, and has to stay a manual check, is everything that actually talks to Chrome — `background.ts`'s event listeners, `chrome.storage`/`chrome.tabs`/`chrome.scripting` calls, and `hud.ts`'s DOM rendering. Worth walking through by hand after a nontrivial change:
+
+- Normal http(s) tabs, `chrome://` internal pages, and a PDF viewer tab (cycling should work identically on all three; the HUD only renders on the first).
+- A DevTools-focused window, and multiple browser windows open at once (try both the global and per-window options).
+- Incognito, if you've enabled "Allow in Incognito" for the extension.
+- Closing a tab that's mid-history, then continuing to cycle — it should skip the closed tab cleanly.
+- Reload the service worker (the "service worker" inspect link on the extension's card) mid-session and confirm history survives; fully quit and relaunch Chrome and confirm it doesn't (by design).
 
 ## Non-goals
 
 - No tab search or fuzzy matching over tabs/bookmarks/history.
 - No tab management (grouping, saving sessions, closing tabs).
-- No visual "carousel" HUD while cycling — this was considered (see `DEV_PLAN.md`) but is a documented future idea, not implemented.
 
 ## Contributing
 
-Issues and PRs welcome. It's a small codebase (`src/background.ts` for the core MRU logic, `src/options.ts` for the options page) — read through `DEV_PLAN.md` for the reasoning behind the trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) before diving in.
+Issues and PRs welcome. It's a small codebase: `src/mru.ts`, `src/hudSession.ts`, and `src/shortcutMatch.ts` hold the pure, unit-tested logic; `src/background.ts` wires the MRU stack and HUD session tracking up to Chrome's APIs, `src/options.ts` does the same for the options page, and `src/hud.ts` is the visual overlay. The trickier design decisions (the activation-guard flag, cursor semantics, session-vs-local storage split) are explained in comments at the point they matter — start there.
+
+All changes to `main` go through a pull request, and CI (`npm test` + a manifest sanity check) must pass before merging.
 
 ## License
 
